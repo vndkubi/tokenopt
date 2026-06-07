@@ -3,10 +3,11 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runBenchmarkCommand } from "./benchmark.js";
 import { runCodexBenchmarkCommand } from "./codex-benchmark.js";
+import { setupCopilotProject, type CopilotSetupScope } from "./copilot-setup.js";
 import { runSuiteBenchmarkCommand } from "./suite-benchmark.js";
 import { loadConfig, makeDefaultRepoConfig, ensureConfigDir } from "./config.js";
 import { handleCodexHook } from "./codex-adapter.js";
-import { runCodexHooksDoctor, runDoctor } from "./doctor.js";
+import { runCodexHooksDoctor, runCopilotDoctor, runDoctor } from "./doctor.js";
 import { runWrappedCommand } from "./exec.js";
 import { installCodexHooks } from "./install.js";
 import {
@@ -55,6 +56,31 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
       metadata: { scope, hooksPath }
     });
     process.stdout.write(`Installed TokenOpt Codex hooks: ${hooksPath}\nRun /hooks in Codex to review and trust them.\n`);
+    return 0;
+  }
+
+  if ((command === "setup" && subcommand === "copilot") || (command === "install" && subcommand === "copilot")) {
+    const loaded = loadConfig();
+    const options = parseCopilotSetupOptions(rest);
+    const result = setupCopilotProject({
+      repoRoot: loaded.repoRoot,
+      ...options
+    });
+    appendEvent(loaded.config, {
+      timestamp: new Date().toISOString(),
+      source: "cli",
+      eventName: "install-copilot",
+      repoRoot: loaded.repoRoot,
+      action: "install",
+      metadata: {
+        scope: options.scope,
+        files: result.files,
+        mcpConfigPath: result.mcpConfigPath,
+        installAgents: options.installAgents,
+        includeRunCommand: options.includeRunCommand
+      }
+    });
+    process.stdout.write(formatCopilotSetupResult(result));
     return 0;
   }
 
@@ -150,6 +176,20 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return output.includes("[ok] hook canary") ? 0 : 1;
   }
 
+  if (command === "doctor" && subcommand === "copilot") {
+    const loaded = loadConfig();
+    const output = runCopilotDoctor(loaded);
+    appendEvent(loaded.config, {
+      timestamp: new Date().toISOString(),
+      source: "cli",
+      eventName: "doctor-copilot",
+      repoRoot: loaded.repoRoot,
+      action: "doctor"
+    });
+    process.stdout.write(`${output}\n`);
+    return 0;
+  }
+
   if (command === "doctor") {
     const loaded = loadConfig();
     const output = runDoctor(loaded);
@@ -180,6 +220,55 @@ function parseScope(args: string[]): "user" | "repo" {
   return "repo";
 }
 
+function parseCopilotSetupOptions(args: string[]): {
+  scope: CopilotSetupScope;
+  installAgents: boolean;
+  tokenoptCliPath?: string;
+  includeRunCommand: boolean;
+} {
+  let scope: CopilotSetupScope = "both";
+  let installAgents = true;
+  let includeRunCommand = true;
+  let tokenoptCliPath: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "--scope") {
+      const value = args[index + 1];
+      if (value !== "user" && value !== "repo" && value !== "both") {
+        throw new Error("--scope must be user, repo, or both");
+      }
+      scope = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--with-agents") {
+      installAgents = true;
+      continue;
+    }
+    if (arg === "--no-agents") {
+      installAgents = false;
+      continue;
+    }
+    if (arg === "--tokenopt-path") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--tokenopt-path requires a path");
+      }
+      tokenoptCliPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--no-run-command") {
+      includeRunCommand = false;
+      continue;
+    }
+    throw new Error(`Unknown Copilot setup option: ${arg}`);
+  }
+
+  return { scope, installAgents, tokenoptCliPath, includeRunCommand };
+}
+
 function parseInstructionTarget(args: string[], fallback: InstructionTarget): InstructionTarget {
   const targetIndex = args.indexOf("--target");
   const value = targetIndex >= 0 ? args[targetIndex + 1] : fallback;
@@ -189,12 +278,37 @@ function parseInstructionTarget(args: string[], fallback: InstructionTarget): In
   throw new Error("--target must be agents, codex, copilot, or generic");
 }
 
+function formatCopilotSetupResult(result: {
+  repoRoot: string;
+  files: string[];
+  warnings: string[];
+  nextSteps: string[];
+}): string {
+  const lines = [
+    "TokenOpt Copilot setup",
+    "",
+    `repo: ${result.repoRoot}`,
+    "",
+    "files:",
+    ...result.files.map((filePath) => `- ${filePath}`),
+    "",
+    "next steps:",
+    ...result.nextSteps.map((step) => `- ${step}`)
+  ];
+  if (result.warnings.length > 0) {
+    lines.push("", "warnings:", ...result.warnings.map((warning) => `- ${warning}`));
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function helpText(): string {
   return `TokenOpt CLI
 
 Commands:
   tokenopt init
   tokenopt install codex --scope user|repo
+  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-run-command]
+  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-run-command]
   tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt exec -- <command...>
   tokenopt mcp
@@ -207,6 +321,7 @@ Commands:
   tokenopt report
   tokenopt doctor
   tokenopt doctor codex-hooks
+  tokenopt doctor copilot
 `;
 }
 

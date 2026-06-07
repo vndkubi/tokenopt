@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { adaptDecisionToCodex, normalizeCodexEvent } from "../dist/codex-adapter.js";
+import { buildCopilotCloudMcpConfig, setupCopilotProject } from "../dist/copilot-setup.js";
 import { emitTokenOptInstructions, installTokenOptInstructions } from "../dist/instruction-audit.js";
 import { compressText } from "../dist/log-compressor.js";
 import { buildCodexHooksConfig, installCodexHooks } from "../dist/install.js";
@@ -117,4 +118,56 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
   const copilotPath = installTokenOptInstructions(repo, "copilot");
   assert.equal(copilotPath, path.join(repo, ".github", "copilot-instructions.md"));
   assert.match(fs.readFileSync(copilotPath, "utf8"), /TokenOpt MCP Usage/);
+});
+
+test("Copilot setup writes repo guidance and merges user MCP config", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-copilot-"));
+  const copilotConfigPath = path.join(repo, "mcp-config.json");
+  const tokenoptCliPath = path.resolve("dist/cli.js");
+  fs.writeFileSync(
+    copilotConfigPath,
+    JSON.stringify({
+      mcpServers: {
+        keep: {
+          type: "http",
+          url: "https://example.test/mcp",
+          tools: ["*"]
+        }
+      }
+    }, null, 2)
+  );
+
+  const result = setupCopilotProject({
+    repoRoot: repo,
+    scope: "both",
+    copilotConfigPath,
+    tokenoptCliPath
+  });
+  setupCopilotProject({
+    repoRoot: repo,
+    scope: "both",
+    copilotConfigPath,
+    tokenoptCliPath
+  });
+
+  const copilotInstructions = fs.readFileSync(path.join(repo, ".github", "copilot-instructions.md"), "utf8");
+  const agentsInstructions = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
+  const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf8"));
+
+  assert.equal((copilotInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
+  assert.equal((agentsInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
+  assert.deepEqual(config.mcpServers.keep.tools, ["*"]);
+  assert.equal(config.mcpServers.tokenopt.command, "node");
+  assert.deepEqual(config.mcpServers.tokenopt.args, [tokenoptCliPath.replace(/\\/g, "/"), "mcp"]);
+  assert.ok(config.mcpServers.tokenopt.tools.includes("tokenopt_compile_evidence"));
+  assert.ok(config.mcpServers.tokenopt.tools.includes("tokenopt_run_command"));
+  assert.doesNotMatch(JSON.stringify(config.mcpServers.tokenopt), /\bnpm(?:\.cmd|\.ps1)?\b/i);
+  assert.ok(result.warnings.some((warning) => /hooks were not installed/i.test(warning)));
+});
+
+test("Copilot cloud MCP example excludes command execution by default", () => {
+  const config = JSON.parse(buildCopilotCloudMcpConfig());
+  assert.equal(config.mcpServers.tokenopt.command, "npx");
+  assert.ok(config.mcpServers.tokenopt.tools.includes("tokenopt_compile_evidence"));
+  assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_run_command"));
 });

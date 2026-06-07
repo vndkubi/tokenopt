@@ -1,9 +1,10 @@
 # TokenOpt Setup Guide
 
-TokenOpt currently has three surfaces:
+TokenOpt currently has four surfaces:
 
 - MCP server: `tokenopt mcp`, the main optimized path.
 - Codex hooks: guardrails for Codex hook events.
+- Copilot setup: MCP config plus repository instructions.
 - Benchmarks: deterministic acquisition benchmark and real `codex exec --json` benchmark.
 
 For GitHub Copilot setup, see [COPILOT_SETUP.md](COPILOT_SETUP.md).
@@ -207,20 +208,30 @@ raw JSONL log path
 
 ## Copilot Status
 
-Copilot is not implemented yet.
+Copilot is implemented as MCP + instructions. Native Copilot hooks are not implemented yet.
 
 Current support:
 
-- Codex MCP server: implemented.
+- TokenOpt MCP server: implemented.
 - Codex hook adapter/install: implemented.
 - Codex CLI benchmark runner: implemented.
-- Copilot instruction audit reads `.github/copilot-instructions.md`: implemented.
+- Copilot local CLI setup: `tokenopt setup copilot --scope user|repo|both`
+- Copilot instruction install: `.github/copilot-instructions.md`
+- Agent instruction install: `AGENTS.md`
+- Copilot setup doctor: `tokenopt doctor copilot`
 
 Not yet implemented:
 
-- `tokenopt install copilot`
 - Copilot hook adapter
 - Copilot hook output schema
 - Copilot-specific benchmark runner
 
-The core policy and evidence packet model are reusable for Copilot, but a separate adapter is still required.
+For a project-level setup:
+
+```powershell
+cd D:\Personal\Projects\your-repo
+node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope both
+node D:\Personal\Projects\tokenopt\dist\cli.js doctor copilot
+```
+
+The core policy and evidence packet model are reusable for Copilot hooks, but a separate hook adapter is still required.

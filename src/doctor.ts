@@ -4,6 +4,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { getCliEntryPath } from "./codex-adapter.js";
+import { getCopilotMcpConfigPath, getDefaultTokenOptCliPath, TOKENOPT_COPILOT_MCP_TOOLS } from "./copilot-setup.js";
 import { getCodexHooksPath } from "./install.js";
 import type { LoadedConfig } from "./types.js";
 
@@ -29,8 +30,71 @@ export function runDoctor(loaded: LoadedConfig): string {
   return lines.join("\n");
 }
 
+export function runCopilotDoctor(loaded: LoadedConfig): string {
+  const copilotInstructionsPath = path.join(loaded.repoRoot, ".github", "copilot-instructions.md");
+  const agentsPath = path.join(loaded.repoRoot, "AGENTS.md");
+  const mcpConfigPath = getCopilotMcpConfigPath();
+  const checks = [
+    check("node", process.version, true),
+    check("tokenopt cli", getDefaultTokenOptCliPath(), fs.existsSync(getDefaultTokenOptCliPath())),
+    check("repo Copilot instructions", copilotInstructionsPath, fs.existsSync(copilotInstructionsPath)),
+    check("repo AGENTS.md", agentsPath, fs.existsSync(agentsPath)),
+    check("user Copilot MCP config", mcpConfigPath, fs.existsSync(mcpConfigPath)),
+    ...inspectCopilotMcpConfig(mcpConfigPath)
+  ];
+
+  return [
+    "TokenOpt Copilot doctor",
+    "",
+    ...checks.map((item) => `${item.ok ? "[ok]" : "[warn]"} ${item.name}: ${item.detail}`),
+    "",
+    "Copilot CLI verification: open the target repo and run `/mcp show tokenopt`.",
+    "GitHub.com cloud agent/code review: configure MCP JSON in Repository -> Settings -> Copilot -> MCP servers; local Windows paths do not work there.",
+    "Copilot hooks are not installed by TokenOpt yet; use MCP + instructions for Copilot today."
+  ].join("\n");
+}
+
 function check(name: string, detail: string, ok: boolean): { name: string; detail: string; ok: boolean } {
   return { name, detail, ok };
+}
+
+function inspectCopilotMcpConfig(filePath: string): Array<{ name: string; detail: string; ok: boolean }> {
+  if (!fs.existsSync(filePath)) {
+    return [
+      check("tokenopt MCP server", "missing; run tokenopt setup copilot --scope user", false)
+    ];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return [
+      check("tokenopt MCP server", `invalid JSON: ${error instanceof Error ? error.message : String(error)}`, false)
+    ];
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) {
+    return [
+      check("tokenopt MCP server", "mcpServers object missing", false)
+    ];
+  }
+  const server = parsed.mcpServers.tokenopt;
+  if (!isRecord(server)) {
+    return [
+      check("tokenopt MCP server", "tokenopt entry missing", false)
+    ];
+  }
+  const args = Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [];
+  const tools = Array.isArray(server.tools) ? server.tools.filter((tool): tool is string => typeof tool === "string") : [];
+  const missingTools = TOKENOPT_COPILOT_MCP_TOOLS.filter((tool) => !tools.includes(tool));
+  return [
+    check("tokenopt MCP command", String(server.command ?? "missing"), server.command === "node"),
+    check("tokenopt MCP args", args.join(" "), args.some((arg) => /cli\.js$/i.test(arg)) && args.includes("mcp")),
+    check("tokenopt MCP tools", missingTools.length === 0 ? tools.join(",") : `missing ${missingTools.join(",")}`, missingTools.length === 0)
+  ];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function checkCommand(name: string, command: string, args: string[]): { name: string; detail: string; ok: boolean } {

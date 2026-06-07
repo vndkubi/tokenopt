@@ -26,6 +26,8 @@ node dist/cli.js doctor
 ```text
 tokenopt init
 tokenopt install codex --scope user|repo
+tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-run-command]
+tokenopt install copilot --scope user|repo|both [--no-agents] [--no-run-command]
 tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
 tokenopt exec -- <command...>
 tokenopt mcp
@@ -36,6 +38,7 @@ tokenopt instructions emit --target agents|codex|copilot
 tokenopt instructions install --target agents|codex|copilot
 tokenopt report
 tokenopt doctor
+tokenopt doctor copilot
 ```
 
 Config precedence is:
@@ -84,6 +87,15 @@ node dist/cli.js instructions install --target copilot
 ```
 
 `agents`/`codex` writes `AGENTS.md`; `copilot` writes `.github/copilot-instructions.md`. The installed block tells agents to call `tokenopt_compile_evidence` first, answer from the packet when `answerable=true`, and avoid shell fallback after the answerability gate.
+
+For Copilot CLI, use the one-command project setup:
+
+```powershell
+node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope both
+node D:\Personal\Projects\tokenopt\dist\cli.js doctor copilot
+```
+
+This installs `.github/copilot-instructions.md`, `AGENTS.md`, and merges a `tokenopt` stdio MCP server into `%USERPROFILE%\.copilot\mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions today.
 
 ## Benchmark
 
