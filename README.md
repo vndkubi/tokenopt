@@ -144,3 +144,13 @@ tokenopt-mcp+gate: MCP mode plus a deliberate redundant followup to verify answe
 ```
 
 Use `tokenopt-mcp-instructed` when proving whether normal prompts like "Investigate flow X" or "write unittest for class Y" route through TokenOpt after setup. The JSON rows include `userPrompt`, `injectedInstruction`, and `prompt` so the benchmark shows what the user wrote versus what the agent setup supplied.
+
+Task sets:
+
+```text
+daily: build handoff, investigate, business/domain research, implement handoff, unit-test handoff.
+realistic: investigate primary flow, PBI/requirement implementation plan, unit-test plan for likely owning class/module, requirement WHAT/WHY/HOW/acceptance criteria analysis.
+all: daily + realistic.
+```
+
+The Codex benchmark rows also include `answerablePackets` and `fallbackAfterAnswerable`. A non-zero fallback means the agent kept exploring after TokenOpt had already marked the packet answerable.

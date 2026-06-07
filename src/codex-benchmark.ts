@@ -4,7 +4,16 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 type CodexBenchmarkMode = "baseline" | "tokenopt-mcp" | "tokenopt-mcp+gate" | "tokenopt-mcp-instructed";
-type CodexTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest";
+type CodexTaskId =
+  | "build-handoff"
+  | "investigate"
+  | "research-business"
+  | "implement"
+  | "write-unittest"
+  | "investigate-flow"
+  | "pbi-plan"
+  | "write-unittest-class"
+  | "requirement-analysis";
 
 interface CodexTask {
   id: CodexTaskId;
@@ -30,6 +39,8 @@ interface CodexRunMetrics {
   mcpCalls: number;
   toolInputChars: number;
   toolOutputChars: number;
+  answerablePackets: number;
+  fallbackAfterAnswerable: number;
   warnings: number;
   rawLogPath: string;
   lastMessagePath: string;
@@ -49,7 +60,7 @@ interface CodexBenchmarkRow extends CodexRunMetrics {
 }
 
 const CODEX_PACKAGE = "@openai/codex@0.137.0";
-const CODEX_TASKS: CodexTask[] = [
+const DAILY_CODEX_TASKS: CodexTask[] = [
   {
     id: "build-handoff",
     taskType: "build_handoff",
@@ -86,6 +97,37 @@ const CODEX_TASKS: CodexTask[] = [
     gatePattern: "test"
   }
 ];
+const REALISTIC_CODEX_TASKS: CodexTask[] = [
+  {
+    id: "investigate-flow",
+    taskType: "investigate",
+    prompt:
+      "Investigate the primary user flow in this codebase. Identify likely entry points, core code paths, dependencies, likely failure points, exact first commands to verify, and what evidence is still missing. Do not modify files.",
+    gatePattern: "flow"
+  },
+  {
+    id: "pbi-plan",
+    taskType: "implement",
+    prompt:
+      "Based on this requirement/PBI, please help me investigate and plan implementation: users need a safer way to change an important configuration without breaking existing behavior. Analyze likely impacted areas, implementation approach, risks, tests, and rollout notes. Do not modify files.",
+    gatePattern: "config"
+  },
+  {
+    id: "write-unittest-class",
+    taskType: "write_unittest",
+    prompt:
+      "Please help me write a unit-test plan for the class or module most likely responsible for the primary business flow in this repository. Identify candidate class/module, test file location, targeted command, mocks/fixtures, and assertions. Do not modify files.",
+    gatePattern: "test"
+  },
+  {
+    id: "requirement-analysis",
+    taskType: "implement",
+    prompt:
+      "Analyze this requirement against the codebase and produce WHAT, WHY, HOW, acceptance criteria, impacted code areas, test strategy, unknowns, and a practical implementation plan: add a guarded behavior change that preserves backwards compatibility for existing users. Do not modify files.",
+    gatePattern: "requirement"
+  }
+];
+const CODEX_TASKS: CodexTask[] = [...DAILY_CODEX_TASKS, ...REALISTIC_CODEX_TASKS];
 
 export async function runCodexBenchmarkCommand(args: string[]): Promise<number> {
   const options = parseOptions(args);
@@ -165,7 +207,7 @@ function parseOptions(args: string[]): {
       if (!value) {
         throw new Error("--task requires a value");
       }
-      tasks = value === "all" ? CODEX_TASKS : value.split(",").map(parseTask);
+      tasks = parseTaskSelection(value);
       index += 1;
       continue;
     }
@@ -301,6 +343,8 @@ function runCodexBenchmark(
     mcpCalls: parsed.mcpCalls,
     toolInputChars: parsed.toolInputChars,
     toolOutputChars: parsed.toolOutputChars,
+    answerablePackets: parsed.answerablePackets,
+    fallbackAfterAnswerable: parsed.fallbackAfterAnswerable,
     warnings: parsed.warnings + stderr.split(/\r?\n/).filter((line) => line.trim()).length + (result.error ? 1 : 0),
     rawLogPath,
     lastMessagePath
@@ -377,6 +421,8 @@ function parseCodexJsonl(text: string): {
   mcpCalls: number;
   toolInputChars: number;
   toolOutputChars: number;
+  answerablePackets: number;
+  fallbackAfterAnswerable: number;
   warnings: number;
 } {
   let finalAnswer = "";
@@ -386,6 +432,9 @@ function parseCodexJsonl(text: string): {
   let mcpCalls = 0;
   let toolInputChars = 0;
   let toolOutputChars = 0;
+  let answerablePackets = 0;
+  let fallbackAfterAnswerable = 0;
+  let sawAnswerablePacket = false;
   let warnings = 0;
 
   for (const line of text.split(/\r?\n/)) {
@@ -428,17 +477,42 @@ function parseCodexJsonl(text: string): {
         shellCalls += 1;
         toolInputChars += typeof item.command === "string" ? item.command.length : 0;
         toolOutputChars += typeof item.aggregated_output === "string" ? item.aggregated_output.length : 0;
+        if (sawAnswerablePacket) {
+          fallbackAfterAnswerable += 1;
+        }
       }
       if (item.type === "mcp_tool_call") {
         toolCalls += 1;
         mcpCalls += 1;
-        toolInputChars += JSON.stringify(item.arguments ?? {}).length;
-        toolOutputChars += JSON.stringify(item.result ?? item.error ?? {}).length;
+        const argumentsText = JSON.stringify(item.arguments ?? {});
+        const resultText = JSON.stringify(item.result ?? item.error ?? {});
+        const itemText = JSON.stringify(item);
+        const isCompileEvidenceCall = /tokenopt_compile_evidence/.test(itemText);
+        toolInputChars += argumentsText.length;
+        toolOutputChars += resultText.length;
+        if (sawAnswerablePacket && !isCompileEvidenceCall) {
+          fallbackAfterAnswerable += 1;
+        }
+        if (isCompileEvidenceCall && /"answerable"\s*:\s*true|answerable=true/i.test(resultText)) {
+          answerablePackets += 1;
+          sawAnswerablePacket = true;
+        }
       }
     }
   }
 
-  return { finalAnswer, usage, toolCalls, shellCalls, mcpCalls, toolInputChars, toolOutputChars, warnings };
+  return {
+    finalAnswer,
+    usage,
+    toolCalls,
+    shellCalls,
+    mcpCalls,
+    toolInputChars,
+    toolOutputChars,
+    answerablePackets,
+    fallbackAfterAnswerable,
+    warnings
+  };
 }
 
 function scoreCodexAnswer(task: CodexTask, answer: string): { score: number; passed: number; total: number } {
@@ -451,18 +525,36 @@ function scoreCodexAnswer(task: CodexTask, answer: string): { score: number; pas
   if (task.id === "build-handoff") {
     checks.push(["build_tool", /\b(Gradle|Maven|Npm|npm|package\.json|pom\.xml|gradlew|mvn)\b/i.test(answer)]);
     checks.push(["command_or_script", /\b(test|build|script|command|gradlew|mvn|npm)\b/i.test(answer)]);
-  } else if (task.id === "investigate") {
+  } else if (task.id === "investigate" || task.id === "investigate-flow") {
     checks.push(["hypothesis", /\b(hypothes|likely|cause|triage|investigate)\b/i.test(answer)]);
     checks.push(["command", /\b(command|run|gradlew|mvn|npm|rg)\b/i.test(answer)]);
+    if (task.id === "investigate-flow") {
+      checks.push(["flow_or_path", /\b(flow|entry|path|route|controller|service|module|dependency)\b/i.test(answer)]);
+      checks.push(["missing_evidence", /\b(missing|unknown|inspect next|evidence to inspect)\b/i.test(answer)]);
+    }
   } else if (task.id === "research-business") {
     checks.push(["purpose", /\b(purpose|repository|project|domain|product)\b/i.test(answer)]);
     checks.push(["areas", /\b(area|module|component|directory|project)\b/i.test(answer)]);
-  } else if (task.id === "implement") {
+  } else if (task.id === "implement" || task.id === "pbi-plan") {
     checks.push(["implementation", /\b(implement|change|edit|inspect|file)\b/i.test(answer)]);
     checks.push(["tests", /\b(test|verify|command)\b/i.test(answer)]);
+    if (task.id === "pbi-plan") {
+      checks.push(["impacted_areas", /\b(impact|area|module|component|file|risk)\b/i.test(answer)]);
+      checks.push(["rollout_or_risk", /\b(risk|rollout|compat|migration|guard)\b/i.test(answer)]);
+    }
+  } else if (task.id === "requirement-analysis") {
+    checks.push(["what", /\bwhat\b|Summary:/i.test(answer)]);
+    checks.push(["why", /\bwhy\b|rationale|reason/i.test(answer)]);
+    checks.push(["how", /\bhow\b|implementation|plan/i.test(answer)]);
+    checks.push(["acceptance_criteria", /\bacceptance criteria\b|\bAC\b|criteria/i.test(answer)]);
+    checks.push(["test_strategy", /\btest|verify|validation/i.test(answer)]);
   } else {
     checks.push(["test_location", /\b(test|tests|unit|location|directory)\b/i.test(answer)]);
     checks.push(["assertions", /\b(assert|cover|case|regression)\b/i.test(answer)]);
+    if (task.id === "write-unittest-class") {
+      checks.push(["candidate_class_or_module", /\b(class|module|service|component|candidate)\b/i.test(answer)]);
+      checks.push(["mocks_or_fixtures", /\b(mock|fixture|stub|fake|test data)\b/i.test(answer)]);
+    }
   }
 
   const passed = checks.filter(([, ok]) => ok).length;
@@ -481,6 +573,8 @@ function formatRows(rows: CodexBenchmarkRow[], showAnswers: boolean): string {
     "Tool",
     "MCP",
     "Shell",
+    "Answerable",
+    "Fallback",
     "Tool in",
     "Tool out",
     "Input tok",
@@ -501,6 +595,8 @@ function formatRows(rows: CodexBenchmarkRow[], showAnswers: boolean): string {
     String(row.toolCalls),
     String(row.mcpCalls),
     String(row.shellCalls),
+    String(row.answerablePackets),
+    String(row.fallbackAfterAnswerable),
     String(row.toolInputChars),
     String(row.toolOutputChars),
     String(row.usage.input_tokens),
@@ -519,7 +615,7 @@ function formatRows(rows: CodexBenchmarkRow[], showAnswers: boolean): string {
   if (!showAnswers) {
     return `${lines.join("\n")}\n`;
   }
-  return `${lines.join("\n")}\n\nAnswers:\n${rows.map((row) => `\n[${path.basename(row.repo)} ${row.task} ${row.mode}]\ntask_type: ${row.taskType}\nuserPrompt:\n${row.userPrompt}\n\ninjectedInstruction:\n${row.injectedInstruction}\n\nactualPromptSentToCodex:\n${row.prompt}\n\nanswer:\n${row.finalAnswer}\nrawLog: ${row.rawLogPath}`).join("\n")}\n`;
+  return `${lines.join("\n")}\n\nAnswers:\n${rows.map((row) => `\n[${path.basename(row.repo)} ${row.task} ${row.mode}]\ntask_type: ${row.taskType}\nanswerablePackets: ${row.answerablePackets}\nfallbackAfterAnswerable: ${row.fallbackAfterAnswerable}\nuserPrompt:\n${row.userPrompt}\n\ninjectedInstruction:\n${row.injectedInstruction}\n\nactualPromptSentToCodex:\n${row.prompt}\n\nanswer:\n${row.finalAnswer}\nrawLog: ${row.rawLogPath}`).join("\n")}\n`;
 }
 
 function parseTask(value: string): CodexTask {
@@ -528,6 +624,19 @@ function parseTask(value: string): CodexTask {
     throw new Error(`Unknown codex benchmark task: ${value}`);
   }
   return task;
+}
+
+function parseTaskSelection(value: string): CodexTask[] {
+  if (value === "all") {
+    return CODEX_TASKS;
+  }
+  if (value === "daily") {
+    return DAILY_CODEX_TASKS;
+  }
+  if (value === "realistic") {
+    return REALISTIC_CODEX_TASKS;
+  }
+  return value.split(",").map(parseTask);
 }
 
 function parseMode(value: string): CodexBenchmarkMode {
@@ -551,6 +660,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function codexBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark codex-daily --repo <path> [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|tokenopt-mcp|tokenopt-mcp+gate|tokenopt-mcp-instructed|all] [--model <model>] [--out <path>] [--json] [--show-answers]
+  tokenopt benchmark codex-daily --repo <path> [--task daily|realistic|all|build-handoff|investigate|research-business|implement|write-unittest|investigate-flow|pbi-plan|write-unittest-class|requirement-analysis] [--mode baseline|tokenopt-mcp|tokenopt-mcp+gate|tokenopt-mcp-instructed|all] [--model <model>] [--out <path>] [--json] [--show-answers]
 `;
 }
