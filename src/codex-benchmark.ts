@@ -38,7 +38,9 @@ interface CodexRunMetrics {
 interface CodexBenchmarkRow extends CodexRunMetrics {
   repo: string;
   task: CodexTaskId;
+  taskType: string;
   mode: CodexBenchmarkMode;
+  prompt: string;
   qualityScore: number;
   qualityChecks: string;
   correct: boolean;
@@ -89,13 +91,16 @@ export async function runCodexBenchmarkCommand(args: string[]): Promise<number> 
   for (const repo of options.repos) {
     for (const task of options.tasks) {
       for (const mode of options.modes) {
-        const run = runCodexBenchmark(repo, task, mode, options);
+        const prompt = buildPrompt(repo, task, mode);
+        const run = runCodexBenchmark(repo, task, mode, options, prompt);
         const quality = scoreCodexAnswer(task, run.finalAnswer);
         rows.push({
           ...run,
           repo,
           task: task.id,
+          taskType: task.taskType,
           mode,
+          prompt,
           qualityScore: quality.score,
           qualityChecks: `${quality.passed}/${quality.total}`,
           correct: quality.score >= 0.8
@@ -227,13 +232,13 @@ function runCodexBenchmark(
   repo: string,
   task: CodexTask,
   mode: CodexBenchmarkMode,
-  options: { codexPackage: string; timeoutMs: number; model?: string }
+  options: { codexPackage: string; timeoutMs: number; model?: string },
+  prompt: string
 ): CodexRunMetrics {
   const start = Date.now();
   const runDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-codex-benchmark-"));
   const rawLogPath = path.join(runDir, `${task.id}-${mode}.jsonl`);
   const lastMessagePath = path.join(runDir, `${task.id}-${mode}-last.txt`);
-  const prompt = buildPrompt(repo, task, mode);
   const args = [
     "-y",
     options.codexPackage,
@@ -481,7 +486,7 @@ function formatRows(rows: CodexBenchmarkRow[], showAnswers: boolean): string {
   if (!showAnswers) {
     return `${lines.join("\n")}\n`;
   }
-  return `${lines.join("\n")}\n\nAnswers:\n${rows.map((row) => `\n[${path.basename(row.repo)} ${row.task} ${row.mode}]\n${row.finalAnswer}\nrawLog: ${row.rawLogPath}`).join("\n")}\n`;
+  return `${lines.join("\n")}\n\nAnswers:\n${rows.map((row) => `\n[${path.basename(row.repo)} ${row.task} ${row.mode}]\ntask_type: ${row.taskType}\nprompt:\n${row.prompt}\n\nanswer:\n${row.finalAnswer}\nrawLog: ${row.rawLogPath}`).join("\n")}\n`;
 }
 
 function parseTask(value: string): CodexTask {
