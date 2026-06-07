@@ -3,6 +3,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runBenchmarkCommand } from "./benchmark.js";
 import { runCodexBenchmarkCommand } from "./codex-benchmark.js";
+import { runSuiteBenchmarkCommand } from "./suite-benchmark.js";
 import { loadConfig, makeDefaultRepoConfig, ensureConfigDir } from "./config.js";
 import { handleCodexHook } from "./codex-adapter.js";
 import { runCodexHooksDoctor, runDoctor } from "./doctor.js";
@@ -80,6 +81,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   if (command === "benchmark") {
+    if (subcommand === "suite") {
+      return runSuiteBenchmarkCommand(rest);
+    }
     if (subcommand === "codex-daily") {
       return runCodexBenchmarkCommand(rest);
     }
@@ -196,6 +200,7 @@ Commands:
   tokenopt mcp
   tokenopt benchmark daily --repo <path> [--mode all]
   tokenopt benchmark codex-daily --repo <path> [--mode all]
+  tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline,mcp-first]
   tokenopt instructions audit
   tokenopt instructions emit --target agents|codex|copilot
   tokenopt instructions install --target agents|codex|copilot
