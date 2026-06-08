@@ -24,7 +24,7 @@ Not implemented yet:
 
 | Surface | Needed? | TokenOpt setup |
 | --- | --- | --- |
-| MCP server | Yes | `tokenopt setup copilot --scope user` merges `tokenopt` into `%USERPROFILE%\.copilot\mcp-config.json`. |
+| MCP server | Yes | `tokenopt setup copilot --scope user` merges `tokenopt` into `<home>/.copilot/mcp-config.json`. |
 | Repo instructions | Yes | `tokenopt setup copilot` writes `.github/copilot-instructions.md`. |
 | Agent instructions | Recommended | `tokenopt setup copilot` writes `AGENTS.md` by default; use `--no-agents` to skip. |
 | Skills | No for V1 | TokenOpt is not packaged as a Copilot skill. MCP + instructions are enough for current behavior. |
@@ -49,7 +49,7 @@ Optional:
 - `rg` / ripgrep on PATH for faster MCP search. If unavailable or blocked, TokenOpt falls back to `git`, then a bounded built-in Node scanner.
 
 ```powershell
-cd D:\Personal\Projects\tokenopt
+cd <tokenopt-repo>
 npm.cmd install
 npm.cmd run build
 node dist\cli.js doctor
@@ -62,9 +62,9 @@ On Windows PowerShell, use `npm.cmd` if `npm.ps1` is blocked.
 Use this for each repo where Copilot should use TokenOpt:
 
 ```powershell
-cd D:\Personal\Projects\your-repo
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope both
-node D:\Personal\Projects\tokenopt\dist\cli.js doctor copilot
+cd <target-repo>
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both
+node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
 Expected result:
@@ -72,22 +72,22 @@ Expected result:
 ```text
 .github/copilot-instructions.md
 AGENTS.md
-%USERPROFILE%\.copilot\mcp-config.json
+<home>/.copilot/mcp-config.json
 ```
 
-`%USERPROFILE%\.copilot\mcp-config.json` is user-global for Copilot CLI. Once the `tokenopt` MCP server is installed there, it is available from other local repos too. The repo instruction files are still project-specific, so run `tokenopt setup copilot --scope repo` inside each project that should steer Copilot toward TokenOpt.
+`<home>/.copilot/mcp-config.json` is user-global for Copilot CLI. Once the `tokenopt` MCP server is installed there, it is available from other local repos too. The repo instruction files are still project-specific, so run `tokenopt setup copilot --scope repo` inside each project that should steer Copilot toward TokenOpt.
 
 Useful variants:
 
 ```powershell
 # Only install repo instructions; do not touch user MCP config.
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope repo
+node <tokenopt-repo>\dist\cli.js setup copilot --scope repo
 
 # Install local Copilot CLI MCP config and repo instructions, but skip AGENTS.md.
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope user --no-agents
+node <tokenopt-repo>\dist\cli.js setup copilot --scope user --no-agents
 
 # Full mode for repos where Copilot should run builds/tests through TokenOpt MCP.
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope user --include-run-command
+node <tokenopt-repo>\dist\cli.js setup copilot --scope user --include-run-command
 ```
 
 The generated MCP entry uses:
@@ -96,7 +96,7 @@ The generated MCP entry uses:
 {
   "type": "local",
   "command": "node",
-  "args": ["D:/Personal/Projects/tokenopt/dist/cli.js", "mcp", "--mode", "lite"]
+  "args": ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"]
 }
 ```
 
@@ -104,21 +104,21 @@ It deliberately avoids `npm`, `npm.ps1`, and PowerShell shims.
 
 ## Setup Option B: Manual Copilot CLI Local MCP
 
-Use this when Copilot CLI runs on your machine and can access `D:\Personal\Projects\tokenopt`.
+Use this when Copilot CLI runs on your machine and can access the TokenOpt build output.
 
 ### 1. Create or edit Copilot MCP config
 
 Copilot CLI reads MCP servers from:
 
 ```text
-%USERPROFILE%\.copilot\mcp-config.json
+<home>/.copilot/mcp-config.json
 ```
 
 Create the directory if needed:
 
 ```powershell
-New-Item -ItemType Directory -Force $env:USERPROFILE\.copilot
-notepad $env:USERPROFILE\.copilot\mcp-config.json
+New-Item -ItemType Directory -Force $HOME\.copilot
+notepad $HOME\.copilot\mcp-config.json
 ```
 
 Add:
@@ -129,7 +129,7 @@ Add:
     "tokenopt": {
       "type": "local",
       "command": "node",
-      "args": ["D:/Personal/Projects/tokenopt/dist/cli.js", "mcp", "--mode", "lite"],
+      "args": ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"],
       "env": {},
       "tools": [
         "tokenopt_compile_evidence",
@@ -148,9 +148,9 @@ Use `--mode full` and add `tokenopt_run_command`, `tokenopt_project_facts` only 
 For each repo where Copilot should use TokenOpt:
 
 ```powershell
-cd D:\Personal\Projects\your-repo
-node D:\Personal\Projects\tokenopt\dist\cli.js instructions install --target copilot
-node D:\Personal\Projects\tokenopt\dist\cli.js instructions install --target agents
+cd <target-repo>
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot
+node <tokenopt-repo>\dist\cli.js instructions install --target agents
 ```
 
 This creates or updates:
@@ -182,7 +182,7 @@ should be routed by the instruction layer. The exact MCP tool name belongs in `.
 Start Copilot CLI in the target repo:
 
 ```powershell
-cd D:\Personal\Projects\your-repo
+cd <target-repo>
 gh copilot
 ```
 
@@ -223,7 +223,7 @@ If you prefer interactive setup:
 ```text
 Server Name: tokenopt
 Server Type: Local or STDIO
-Command: node D:/Personal/Projects/tokenopt/dist/cli.js mcp
+Command: node <tokenopt-repo>/dist/cli.js mcp
 Args: --mode lite
 Tools: tokenopt_compile_evidence,tokenopt_search,tokenopt_read_file
 ```
@@ -240,10 +240,10 @@ Tools: tokenopt_compile_evidence,tokenopt_search,tokenopt_read_file
 Do not use the local Windows path in cloud agent config:
 
 ```text
-D:/Personal/Projects/tokenopt/dist/cli.js
+<tokenopt-repo>/dist/cli.js
 ```
 
-That path exists only on your machine. GitHub.com Copilot cloud agent runs in an ephemeral Linux sandbox, so it cannot access your local `D:\...` repo.
+That path exists only on your machine. GitHub.com Copilot cloud agent runs in an ephemeral Linux sandbox, so it cannot access your local repo path.
 
 For cloud agent or Copilot code review, TokenOpt must be available inside the cloud sandbox. That means one of these:
 
@@ -334,7 +334,7 @@ If Copilot cannot see TokenOpt:
 Check:
 
 - `node` is on PATH.
-- `D:/Personal/Projects/tokenopt/dist/cli.js` exists.
+- `<tokenopt-repo>/dist/cli.js` exists.
 - `npm.cmd run build` was run after code changes.
 - `mcp-config.json` is valid JSON.
 - Tool names are allowlisted correctly.

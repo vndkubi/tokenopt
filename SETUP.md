@@ -31,7 +31,7 @@ npm.cmd run build
 From the TokenOpt repo:
 
 ```powershell
-cd D:\Personal\Projects\tokenopt
+cd <tokenopt-repo>
 npm.cmd install
 npm.cmd run build
 node dist\cli.js doctor
@@ -40,7 +40,7 @@ node dist\cli.js doctor
 Initialize per-repo config when needed:
 
 ```powershell
-node D:\Personal\Projects\tokenopt\dist\cli.js init
+node <tokenopt-repo>\dist\cli.js init
 ```
 
 Config precedence:
@@ -53,12 +53,12 @@ built-in defaults -> ~/.tokenopt/config.json -> <repo>/.tokenopt/config.json -> 
 
 This is the recommended mode for optimization because it makes TokenOpt the acquisition path instead of letting the agent freely alternate between shell and MCP.
 
-Add this to `C:\Users\SonCao\.codex\config.toml`:
+Add this to `<home>/.codex/config.toml`:
 
 ```toml
 [mcp_servers.tokenopt]
 command = "node"
-args = ["D:/Personal/Projects/tokenopt/dist/cli.js", "mcp", "--mode", "lite"]
+args = ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"]
 ```
 
 For strict runs, disable Codex's built-in shell tool and force the agent through TokenOpt MCP:
@@ -69,9 +69,9 @@ npx.cmd -y @openai/codex@0.137.0 exec `
   --ephemeral `
   --skip-git-repo-check `
   --disable shell_tool `
-  -C D:\Personal\Projects\tokenopt `
+  -C <target-repo> `
   -c "mcp_servers.tokenopt.command='node'" `
-  -c "mcp_servers.tokenopt.args=['D:/Personal/Projects/tokenopt/dist/cli.js','mcp','--mode','lite']" `
+  -c "mcp_servers.tokenopt.args=['<tokenopt-repo>/dist/cli.js','mcp','--mode','lite']" `
   "Use TokenOpt as a cost gate: call tokenopt_compile_evidence only when it can replace broad exploration, then answer from the packet if answerable=true."
 ```
 
@@ -86,7 +86,7 @@ tokenopt_read_file
 Full mode adds command execution and standalone project facts:
 
 ```text
-node D:\Personal\Projects\tokenopt\dist\cli.js mcp --mode full
+node <tokenopt-repo>\dist\cli.js mcp --mode full
 ```
 
 ## Agent Instructions
@@ -96,14 +96,14 @@ MCP only exposes tools. The agent also needs instructions that tell it when Toke
 Preview the reusable instruction snippet:
 
 ```powershell
-node D:\Personal\Projects\tokenopt\dist\cli.js instructions emit --target agents
+node <tokenopt-repo>\dist\cli.js instructions emit --target agents
 ```
 
 Install it into repo instructions:
 
 ```powershell
-cd D:\Personal\Projects\your-repo
-node D:\Personal\Projects\tokenopt\dist\cli.js instructions install --target agents
+cd <target-repo>
+node <tokenopt-repo>\dist\cli.js instructions install --target agents
 ```
 
 Targets:
@@ -146,7 +146,7 @@ Hooks are useful as guardrails, but they are weaker than strict MCP mode because
 Install hooks:
 
 ```powershell
-node D:\Personal\Projects\tokenopt\dist\cli.js install codex --scope user
+node <tokenopt-repo>\dist\cli.js install codex --scope user
 ```
 
 Then open Codex and run:
@@ -160,7 +160,7 @@ Review and trust the TokenOpt hook commands.
 Verify hook canary:
 
 ```powershell
-node D:\Personal\Projects\tokenopt\dist\cli.js doctor codex-hooks
+node <tokenopt-repo>\dist\cli.js doctor codex-hooks
 ```
 
 If the WindowsApps `codex.exe` alias returns `Access is denied`, use:
@@ -175,8 +175,8 @@ Deterministic acquisition benchmark:
 
 ```powershell
 node dist\cli.js benchmark daily `
-  --repo D:\Personal\Projects\elasticsearch `
-  --repo D:\Personal\Projects\hadoop `
+  --repo <repo-a> `
+  --repo <repo-b> `
   --task all `
   --mode all `
   --show-answers `
@@ -187,7 +187,7 @@ Real Codex CLI benchmark:
 
 ```powershell
 node dist\cli.js benchmark codex-daily `
-  --repo D:\Personal\Projects\hadoop `
+  --repo <target-repo> `
   --task build-handoff `
   --mode baseline,tokenopt-mcp `
   --show-answers `
@@ -242,9 +242,9 @@ Not yet implemented:
 For a project-level setup:
 
 ```powershell
-cd D:\Personal\Projects\your-repo
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope both
-node D:\Personal\Projects\tokenopt\dist\cli.js doctor copilot
+cd <target-repo>
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both
+node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
 The core policy and evidence packet model are reusable for Copilot hooks, but a separate hook adapter is still required.

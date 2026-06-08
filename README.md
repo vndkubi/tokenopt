@@ -59,7 +59,7 @@ shell_tool = false
 
 [mcp_servers.tokenopt]
 command = "node"
-args = ["D:\\Personal\\Projects\\tokenopt\\dist\\cli.js", "mcp", "--mode", "lite"]
+args = ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"]
 required = true
 default_tools_approval_mode = "approve"
 ```
@@ -102,18 +102,18 @@ node dist/cli.js instructions install --target copilot
 For Copilot CLI, use the one-command project setup:
 
 ```powershell
-node D:\Personal\Projects\tokenopt\dist\cli.js setup copilot --scope both
-node D:\Personal\Projects\tokenopt\dist\cli.js doctor copilot
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both
+node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
-This installs `.github/copilot-instructions.md`, `AGENTS.md`, and merges a lite `tokenopt` stdio MCP server into `%USERPROFILE%\.copilot\mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
+This installs `.github/copilot-instructions.md`, `AGENTS.md`, and merges a lite `tokenopt` stdio MCP server into `<home>/.copilot/mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
 
 ## Benchmark
 
 Run the repeatable acquisition benchmark:
 
 ```bash
-node dist/cli.js benchmark daily --repo D:\Personal\Projects\elasticsearch --repo D:\Personal\Projects\hadoop --task all --mode all --show-answers --out benchmark-results\daily-large-repos.json
+node dist/cli.js benchmark daily --repo <repo-a> --repo <repo-b> --task all --mode all --show-answers --out benchmark-results/daily-large-repos.json
 ```
 
 The benchmark reports model-visible tool input/output chars, final output chars, estimated input/output/total tokens, quality score, quality checks, tool calls, MCP calls, shell calls, and fallback-after-answerable for:
@@ -140,7 +140,7 @@ Quality is scored by deterministic rubric checks against the generated benchmark
 For agent-level measurement through the real Codex CLI:
 
 ```bash
-node dist/cli.js benchmark codex-daily --repo D:\Personal\Projects\tokenopt --task build-handoff --mode all --show-answers --out benchmark-results\codex-daily-tokenopt.json
+node dist/cli.js benchmark codex-daily --repo <target-repo> --task build-handoff --mode all --show-answers --out benchmark-results/codex-daily-target.json
 ```
 
 This runner executes `npx @openai/codex@0.137.0 exec --json`, parses `turn.completed.usage`, counts shell and MCP tool calls, records raw JSONL logs, and scores the final Codex answer with the same task rubric.
