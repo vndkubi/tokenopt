@@ -130,7 +130,7 @@ Expected agent flow:
 5. With Codex hooks trusted, shell grep/search after a packet is denied when TokenOpt has already provided answer-now guidance or exact TokenOpt followups.
 ```
 
-For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", TokenOpt infers `task_type=api_flow`, identifies candidate entrypoints/services/tests/docs, returns a diagram contract, and requires exact `tokenopt_search`/`tokenopt_read_file` followups before the final diagram. For prompts such as "study business and deep dive that business", TokenOpt infers `task_type=research_business` and includes business purpose, likely users, core capabilities, major project areas, domain terms, doc signals, and final-answer sections in the evidence packet.
+For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", TokenOpt infers `task_type=api_flow`, identifies candidate entrypoints/services/tests/docs, returns a diagram contract, quality checks, and requires exact `tokenopt_search`/`tokenopt_read_file` followups before the final diagram. For prompts such as "study business and deep dive that business", TokenOpt infers `task_type=research_business` and includes business purpose, likely users, core capabilities, major project areas, domain terms, doc signals, required sections, evidence rules, and final-answer quality checks in the evidence packet.
 
 ## Codex Hooks Setup
 

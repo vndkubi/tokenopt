@@ -124,6 +124,14 @@ export interface EvidenceFollowup {
   max_output_tokens?: number;
 }
 
+export interface EvidenceAnswerContract {
+  required_sections: string[];
+  evidence_rules: string[];
+  quality_checks: string[];
+  failure_conditions: string[];
+  user_rubric: string[];
+}
+
 export interface EvidencePacket {
   packet_id: string;
   task: string;
@@ -134,6 +142,7 @@ export interface EvidencePacket {
   coverage: Record<string, EvidenceCoverageStatus>;
   evidence: EvidenceItem[];
   missing: string[];
+  answer_contract: EvidenceAnswerContract;
   allowed_followups: EvidenceFollowup[];
   disallowed_followups: string[];
   recommended_next_action: EvidenceNextAction;

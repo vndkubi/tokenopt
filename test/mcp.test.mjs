@@ -146,6 +146,9 @@ test("mcp compiles business deep-dive evidence and gates grep fallback", async (
       assert.match(packet.content[0].text, /business_purpose=Merchant Platform helps online merchants/);
       assert.match(packet.content[0].text, /likely_users=.*business users\/customers/);
       assert.match(packet.content[0].text, /final_answer_sections=What this business\/product is/);
+      assert.match(packet.content[0].text, /Answer contract:/);
+      assert.match(packet.content[0].text, /What the business\/product is/);
+      assert.match(packet.content[0].text, /Maps capabilities to code\/project areas/);
       assert.match(packet.content[0].text, /shell_grep/);
 
       const gated = await client.callTool({
@@ -201,6 +204,9 @@ test("mcp compiles existing flow packet for diagramming and routes fallback to T
       assert.match(packet.content[0].text, /candidate_services=.*CheckoutService\.ts/);
       assert.match(packet.content[0].text, /candidate_tests=.*CheckoutFlow\.test\.ts/);
       assert.match(packet.content[0].text, /Mermaid sequenceDiagram or flowchart/);
+      assert.match(packet.content[0].text, /Answer contract:/);
+      assert.match(packet.content[0].text, /Each flow edge must cite a matched file\/symbol/);
+      assert.match(packet.content[0].text, /Includes valid Mermaid syntax/);
       assert.match(packet.content[0].text, /tokenopt_search: Find exact references/);
 
       const search = await client.callTool({

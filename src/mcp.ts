@@ -341,6 +341,7 @@ function compileEvidenceTool(args: Record<string, unknown>) {
             max_output_tokens: 900
           }
         ];
+  const answerContract = buildAnswerContract(taskType, task, qualityRubric, answerable);
   const packet: EvidencePacket = {
     packet_id: crypto.randomUUID(),
     task,
@@ -351,6 +352,7 @@ function compileEvidenceTool(args: Record<string, unknown>) {
     coverage,
     evidence,
     missing,
+    answer_contract: answerContract,
     allowed_followups: allowedFollowups,
     disallowed_followups: answerable
       ? [
@@ -1841,6 +1843,119 @@ function isEvidenceAnswerable(
   }
 }
 
+function buildAnswerContract(
+  taskType: EvidenceTaskType,
+  task: string,
+  qualityRubric: string[],
+  answerable: boolean
+): EvidencePacket["answer_contract"] {
+  const wantsDiagram = /\b(flow|sequence\s*diagram|flowchart|diagram|mermaid)\b/i.test(task) || /\bvẽ\b/i.test(task);
+  const commonEvidenceRules = [
+    "Cite evidence IDs and file paths from the packet for every substantive repository claim.",
+    "Separate proven facts from inference; label uncertain claims as inferred or unknown.",
+    "Do not invent entrypoints, call chains, business rules, test commands, or dependencies not supported by evidence.",
+    answerable
+      ? "Because answerable=true, answer from the packet and do not gather redundant evidence."
+      : "Because answerable=false, do not present a final definitive answer until allowed_followups have covered missing exact code evidence."
+  ];
+  const commonFailureConditions = [
+    "Fails quality if it hides missing evidence or presents an inferred flow as proven.",
+    "Fails quality if it uses raw shell grep/search when TokenOpt followups are available.",
+    "Fails quality if it answers only with generic repository advice without mapping to packet evidence."
+  ];
+
+  switch (taskType) {
+    case "api_flow":
+      return {
+        required_sections: [
+          "Scope and target flow",
+          "Business meaning of the flow",
+          "Actors, triggers, and preconditions",
+          "Step-by-step sequence",
+          "Data/state changes",
+          "External dependencies and side effects",
+          "Failure paths and edge cases",
+          wantsDiagram ? "Mermaid sequenceDiagram or flowchart" : "Diagram-ready flow summary",
+          "Evidence used",
+          "Unknowns and exact followups"
+        ],
+        evidence_rules: [
+          ...commonEvidenceRules,
+          "Each flow edge must cite a matched file/symbol or be marked inferred.",
+          "If only candidate files are known, describe them as candidates and run/read allowed followups before drawing a definitive diagram."
+        ],
+        quality_checks: [
+          "Names the exact flow target and does not drift to whole-repo overview.",
+          "Identifies entrypoint, service/domain layer, data/model layer, and tests/examples when evidence exists.",
+          "Includes business context, not just technical call order.",
+          wantsDiagram ? "Includes valid Mermaid syntax and labels unknown edges explicitly." : "Can be converted into a Mermaid diagram without adding unstated steps.",
+          ...qualityRubric
+        ],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+    case "research_business":
+      return {
+        required_sections: [
+          "What the business/product is",
+          "Who it serves",
+          "Why it exists",
+          "How the system supports the business",
+          "Core capabilities",
+          "Major code/project areas",
+          "Risks, assumptions, and unknowns",
+          "Evidence used"
+        ],
+        evidence_rules: [
+          ...commonEvidenceRules,
+          "Tie business claims back to README/docs/package/build identity and major project areas.",
+          "Do not turn project structure into business claims unless docs or names support the inference."
+        ],
+        quality_checks: [
+          "Explains business in plain language before technical mapping.",
+          "Covers what/why/how and likely users.",
+          "Maps capabilities to code/project areas.",
+          "States confidence and gaps honestly.",
+          ...qualityRubric
+        ],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+    case "implement":
+      return {
+        required_sections: ["Goal", "Current evidence", "Files to inspect/change", "Implementation plan", "Tests", "Risks/unknowns"],
+        evidence_rules: commonEvidenceRules,
+        quality_checks: ["Names exact candidate files/symbols.", "Keeps plan actionable and testable.", ...qualityRubric],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+    case "write_unittest":
+      return {
+        required_sections: ["Target class/module", "Behavior to cover", "Test file location", "Fixtures/mocks", "Assertions", "Targeted command"],
+        evidence_rules: commonEvidenceRules,
+        quality_checks: ["Tests map to business behavior and likely failure paths.", "Avoids full-suite command as first verification.", ...qualityRubric],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+    case "build_handoff":
+      return {
+        required_sections: ["Build system", "Key commands", "Repo layout", "Fast verification path", "Known gaps"],
+        evidence_rules: commonEvidenceRules,
+        quality_checks: ["Commands are copied from package/build files when available.", "Avoids unsupported assumptions.", ...qualityRubric],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+    default:
+      return {
+        required_sections: ["Answer", "Evidence used", "Assumptions", "Missing items", "Next exact steps"],
+        evidence_rules: commonEvidenceRules,
+        quality_checks: ["Directly answers the user task.", "Keeps claims grounded in packet evidence.", ...qualityRubric],
+        failure_conditions: commonFailureConditions,
+        user_rubric: qualityRubric
+      };
+  }
+}
+
 function factSourceFiles(facts: string[]): string[] {
   const files = new Set<string>();
   for (const fact of facts) {
@@ -1881,6 +1996,16 @@ function formatEvidencePacket(packet: EvidencePacket, statePath: string | undefi
       ...(item.files && item.files.length > 0 ? [`  files: ${item.files.join(", ")}`] : []),
       ...(item.facts ?? []).slice(0, 32).map((fact) => `  fact: ${fact}`)
     ]),
+    "",
+    "Answer contract:",
+    "Required sections:",
+    ...packet.answer_contract.required_sections.map((item) => `- ${item}`),
+    "Evidence rules:",
+    ...packet.answer_contract.evidence_rules.map((item) => `- ${item}`),
+    "Quality checks:",
+    ...packet.answer_contract.quality_checks.map((item) => `- ${item}`),
+    "Failure conditions:",
+    ...packet.answer_contract.failure_conditions.map((item) => `- ${item}`),
     "",
     "Missing:",
     ...(packet.missing.length > 0 ? packet.missing.map((item) => `- ${item}`) : ["- none"]),
