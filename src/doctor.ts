@@ -37,12 +37,16 @@ export function runDoctor(loaded: LoadedConfig): string {
 
 export function runCopilotDoctor(loaded: LoadedConfig): string {
   const copilotInstructionsPath = path.join(loaded.repoRoot, ".github", "copilot-instructions.md");
+  const copilotPathInstructionsPath = path.join(loaded.repoRoot, ".github", "instructions", "tokenopt.instructions.md");
+  const copilotAgentPath = path.join(loaded.repoRoot, ".github", "agents", "tokenopt-cost-gate.agent.md");
   const agentsPath = path.join(loaded.repoRoot, "AGENTS.md");
   const mcpConfigPath = getCopilotMcpConfigPath();
   const checks = [
     check("node", process.version, true),
     check("tokenopt cli", getDefaultTokenOptCliPath(), fs.existsSync(getDefaultTokenOptCliPath())),
     check("repo Copilot instructions", copilotInstructionsPath, fs.existsSync(copilotInstructionsPath)),
+    check("repo Copilot path instructions", copilotPathInstructionsPath, fs.existsSync(copilotPathInstructionsPath)),
+    check("repo Copilot custom agent", copilotAgentPath, fs.existsSync(copilotAgentPath)),
     check("repo AGENTS.md", agentsPath, fs.existsSync(agentsPath)),
     check("user Copilot MCP config", mcpConfigPath, fs.existsSync(mcpConfigPath)),
     ...inspectCopilotMcpConfig(mcpConfigPath)

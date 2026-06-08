@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { estimateTokens } from "./log-compressor.js";
 
-export type InstructionTarget = "agents" | "codex" | "copilot" | "generic";
+export type InstructionTarget = "agents" | "codex" | "copilot" | "copilot-path" | "copilot-agent" | "generic";
 
 interface AuditFile {
   path: string;
@@ -32,6 +32,47 @@ export function auditInstructions(repoRoot: string): string {
 }
 
 export function emitTokenOptInstructions(target: InstructionTarget = "generic"): string {
+  if (target === "copilot-path") {
+    return [
+      "---",
+      "applyTo: \"**\"",
+      "---",
+      "",
+      emitTokenOptInstructions("copilot")
+    ].join("\n");
+  }
+  if (target === "copilot-agent") {
+    return [
+      "---",
+      "name: tokenopt-cost-gate",
+      "description: Use for broad repository handoff, business/domain research, implementation planning, and unit-test planning tasks where TokenOpt MCP can replace broad exploration.",
+      "tools: [\"tokenopt/tokenopt_compile_evidence\", \"tokenopt/tokenopt_search\", \"tokenopt/tokenopt_read_file\", \"search\", \"read\"]",
+      "---",
+      "",
+      "# TokenOpt Cost Gate Agent",
+      "",
+      "Use TokenOpt MCP as a cost gate for broad repo tasks. Do not treat it as a mandatory extra step.",
+      "",
+      "Natural prompts that should trigger TokenOpt first:",
+      "",
+      "```text",
+      "- Study or summarize a business/domain area from repo evidence",
+      "- Prepare build, onboarding, or daily handoff",
+      "- Plan implementation before editing",
+      "- Plan unit tests before writing them",
+      "- Investigate a broad failure surface before choosing exact files",
+      "```",
+      "",
+      "Workflow:",
+      "",
+      "```text",
+      "1. Call tokenopt_compile_evidence with the user's task, inferred task_type, cwd, budget_tokens around 1200, and a concrete quality_rubric.",
+      "2. If answerable=true, answer from the packet with zero redundant search/read.",
+      "3. If answerable=false, use only tokenopt_search/tokenopt_read_file followups from the packet.",
+      "4. If the task is an exact code-flow/class/PBI deep dive that will need line-level proof, report that TokenOpt is not the cheapest first step and use normal narrow search/read outside this agent.",
+      "```"
+    ].join("\n");
+  }
   const heading =
     target === "copilot"
       ? "# TokenOpt MCP Usage"
@@ -127,6 +168,10 @@ export function installTokenOptInstructions(repoRoot: string, target: Exclude<In
   const filePath = instructionTargetPath(repoRoot, target);
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   const snippet = emitTokenOptInstructions(target);
+  if (target === "copilot-path" || target === "copilot-agent") {
+    fs.writeFileSync(filePath, `${snippet.trimEnd()}\n`, "utf8");
+    return filePath;
+  }
   const markerStart = "<!-- tokenopt:mcp-instructions:start -->";
   const markerEnd = "<!-- tokenopt:mcp-instructions:end -->";
   const block = `${markerStart}\n${snippet}\n${markerEnd}`;
@@ -141,6 +186,12 @@ export function installTokenOptInstructions(repoRoot: string, target: Exclude<In
 function instructionTargetPath(repoRoot: string, target: Exclude<InstructionTarget, "generic">): string {
   if (target === "copilot") {
     return path.join(repoRoot, ".github", "copilot-instructions.md");
+  }
+  if (target === "copilot-path") {
+    return path.join(repoRoot, ".github", "instructions", "tokenopt.instructions.md");
+  }
+  if (target === "copilot-agent") {
+    return path.join(repoRoot, ".github", "agents", "tokenopt-cost-gate.agent.md");
   }
   return path.join(repoRoot, "AGENTS.md");
 }
@@ -159,6 +210,14 @@ function findInstructionFiles(repoRoot: string): string[] {
     for (const entry of fs.readdirSync(instructionDir)) {
       if (entry.endsWith(".instructions.md")) {
         candidates.push(path.join(instructionDir, entry));
+      }
+    }
+  }
+  const agentDir = path.join(repoRoot, ".github", "agents");
+  if (fs.existsSync(agentDir)) {
+    for (const entry of fs.readdirSync(agentDir)) {
+      if (entry.endsWith(".agent.md")) {
+        candidates.push(path.join(agentDir, entry));
       }
     }
   }

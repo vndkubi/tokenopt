@@ -34,7 +34,9 @@ export interface CopilotSetupResult {
   nextSteps: string[];
   mcpConfigPath?: string;
   copilotInstructionsPath: string;
+  copilotPathInstructionsPath: string;
   agentsPath?: string;
+  copilotAgentPath?: string;
 }
 
 export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupResult {
@@ -48,11 +50,16 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
 
   const copilotInstructionsPath = installTokenOptInstructions(repoRoot, "copilot");
   files.push(copilotInstructionsPath);
+  const copilotPathInstructionsPath = installTokenOptInstructions(repoRoot, "copilot-path");
+  files.push(copilotPathInstructionsPath);
 
   let agentsPath: string | undefined;
+  let copilotAgentPath: string | undefined;
   if (installAgents) {
     agentsPath = installTokenOptInstructions(repoRoot, "agents");
     files.push(agentsPath);
+    copilotAgentPath = installTokenOptInstructions(repoRoot, "copilot-agent");
+    files.push(copilotAgentPath);
   }
 
   let mcpConfigPath: string | undefined;
@@ -75,7 +82,7 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
   }
 
   if (!installAgents) {
-    warnings.push("AGENTS.md was skipped; Copilot can still use .github/copilot-instructions.md, but other agent surfaces may miss the TokenOpt guidance.");
+    warnings.push("AGENTS.md and the TokenOpt custom agent were skipped; Copilot can still use .github/copilot-instructions.md and .github/instructions/tokenopt.instructions.md, but agent surfaces may miss stronger TokenOpt guidance.");
   }
   if (!includeRunCommand) {
     warnings.push("TokenOpt MCP was installed in lite mode; command execution and project_facts tools are not exposed unless you rerun setup with --include-run-command.");
@@ -89,7 +96,9 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     nextSteps,
     mcpConfigPath,
     copilotInstructionsPath,
-    agentsPath
+    copilotPathInstructionsPath,
+    agentsPath,
+    copilotAgentPath
   };
 }
 

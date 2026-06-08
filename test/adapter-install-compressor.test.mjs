@@ -119,6 +119,15 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
   const copilotPath = installTokenOptInstructions(repo, "copilot");
   assert.equal(copilotPath, path.join(repo, ".github", "copilot-instructions.md"));
   assert.match(fs.readFileSync(copilotPath, "utf8"), /TokenOpt MCP Usage/);
+
+  const copilotPathInstructionsPath = installTokenOptInstructions(repo, "copilot-path");
+  assert.equal(copilotPathInstructionsPath, path.join(repo, ".github", "instructions", "tokenopt.instructions.md"));
+  assert.match(fs.readFileSync(copilotPathInstructionsPath, "utf8"), /applyTo: "\*\*"/);
+
+  const copilotAgentPath = installTokenOptInstructions(repo, "copilot-agent");
+  assert.equal(copilotAgentPath, path.join(repo, ".github", "agents", "tokenopt-cost-gate.agent.md"));
+  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /name: tokenopt-cost-gate/);
+  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /tokenopt\/tokenopt_compile_evidence/);
 });
 
 test("Copilot setup writes repo guidance and merges user MCP config", () => {
@@ -152,10 +161,16 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   });
 
   const copilotInstructions = fs.readFileSync(path.join(repo, ".github", "copilot-instructions.md"), "utf8");
+  const copilotPathInstructions = fs.readFileSync(path.join(repo, ".github", "instructions", "tokenopt.instructions.md"), "utf8");
+  const copilotAgent = fs.readFileSync(path.join(repo, ".github", "agents", "tokenopt-cost-gate.agent.md"), "utf8");
   const agentsInstructions = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
   const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf8"));
 
   assert.equal((copilotInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
+  assert.match(copilotPathInstructions, /applyTo: "\*\*"/);
+  assert.match(copilotPathInstructions, /TokenOpt MCP Usage/);
+  assert.match(copilotAgent, /name: tokenopt-cost-gate/);
+  assert.match(copilotAgent, /tokenopt\/tokenopt_compile_evidence/);
   assert.equal((agentsInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
   assert.deepEqual(config.mcpServers.keep.tools, ["*"]);
   assert.equal(config.mcpServers.tokenopt.command, "node");

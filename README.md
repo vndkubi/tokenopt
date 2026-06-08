@@ -34,8 +34,8 @@ tokenopt mcp [--mode lite|full]
 tokenopt benchmark daily --repo <path> [--task all] [--mode all] [--out results.json]
 tokenopt benchmark codex-daily --repo <path> [--mode all] [--out results.json]
 tokenopt instructions audit
-tokenopt instructions emit --target agents|codex|copilot
-tokenopt instructions install --target agents|codex|copilot
+tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
+tokenopt instructions install --target agents|codex|copilot|copilot-path|copilot-agent
 tokenopt report
 tokenopt doctor
 tokenopt doctor copilot
@@ -95,9 +95,11 @@ MCP tools also need agent instructions. Emit or install the reusable prompt snip
 node dist/cli.js instructions emit --target agents
 node dist/cli.js instructions install --target agents
 node dist/cli.js instructions install --target copilot
+node dist/cli.js instructions install --target copilot-path
+node dist/cli.js instructions install --target copilot-agent
 ```
 
-`agents`/`codex` writes `AGENTS.md`; `copilot` writes `.github/copilot-instructions.md`. The installed block tells agents to use TokenOpt as a cost gate, answer from the packet when `answerable=true`, and avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
+`agents`/`codex` writes `AGENTS.md`; `copilot` writes `.github/copilot-instructions.md`; `copilot-path` writes `.github/instructions/tokenopt.instructions.md` with `applyTo: "**"`; `copilot-agent` writes `.github/agents/tokenopt-cost-gate.agent.md`. These files tell agents to use TokenOpt as a cost gate, answer from the packet when `answerable=true`, and avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
 
 For Copilot CLI, use the one-command project setup:
 
@@ -106,7 +108,7 @@ node <tokenopt-repo>\dist\cli.js setup copilot --scope both
 node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
-This installs `.github/copilot-instructions.md`, `AGENTS.md`, and merges a lite `tokenopt` stdio MCP server into `<home>/.copilot/mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
+This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, and merges a lite `tokenopt` stdio MCP server into `<home>/.copilot/mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
 
 ## Benchmark
 

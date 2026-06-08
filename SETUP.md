@@ -104,14 +104,19 @@ Install it into repo instructions:
 ```powershell
 cd <target-repo>
 node <tokenopt-repo>\dist\cli.js instructions install --target agents
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot-path
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot-agent
 ```
 
 Targets:
 
 ```text
-agents  -> AGENTS.md
-codex   -> AGENTS.md
-copilot -> .github/copilot-instructions.md
+agents        -> AGENTS.md
+codex         -> AGENTS.md
+copilot       -> .github/copilot-instructions.md
+copilot-path  -> .github/instructions/tokenopt.instructions.md
+copilot-agent -> .github/agents/tokenopt-cost-gate.agent.md
 ```
 
 The installed block is wrapped in markers:
@@ -123,6 +128,8 @@ The installed block is wrapped in markers:
 ```
 
 Running install again updates the existing block instead of appending duplicates.
+
+Copilot may ignore MCP unless the relevant instruction/custom-agent files are loaded for the current surface. After setup, verify Copilot references `.github/copilot-instructions.md` or `.github/instructions/tokenopt.instructions.md`, and verify the custom agent appears in Copilot CLI with `/agent` when that surface supports project custom agents.
 
 Expected agent flow:
 
@@ -232,6 +239,8 @@ Current support:
 - Codex CLI benchmark runner: implemented.
 - Copilot local CLI setup: `tokenopt setup copilot --scope user|repo|both`
 - Copilot instruction install: `.github/copilot-instructions.md`
+- Copilot path instruction install: `.github/instructions/tokenopt.instructions.md`
+- Copilot custom agent install: `.github/agents/tokenopt-cost-gate.agent.md`
 - Agent instruction install: `AGENTS.md`
 - Copilot setup doctor: `tokenopt doctor copilot`
 

@@ -143,7 +143,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "instructions" && subcommand === "install") {
     const target = parseInstructionTarget(rest, "agents");
     if (target === "generic") {
-      process.stderr.write("Usage: tokenopt instructions install --target agents|codex|copilot\n");
+      process.stderr.write("Usage: tokenopt instructions install --target agents|codex|copilot|copilot-path|copilot-agent\n");
       return 2;
     }
     const loaded = loadConfig();
@@ -295,10 +295,10 @@ function parseMcpMode(args: string[]): "lite" | "full" | undefined {
 function parseInstructionTarget(args: string[], fallback: InstructionTarget): InstructionTarget {
   const targetIndex = args.indexOf("--target");
   const value = targetIndex >= 0 ? args[targetIndex + 1] : fallback;
-  if (value === "agents" || value === "codex" || value === "copilot" || value === "generic") {
+  if (value === "agents" || value === "codex" || value === "copilot" || value === "copilot-path" || value === "copilot-agent" || value === "generic") {
     return value;
   }
-  throw new Error("--target must be agents, codex, copilot, or generic");
+  throw new Error("--target must be agents, codex, copilot, copilot-path, copilot-agent, or generic");
 }
 
 function formatCopilotSetupResult(result: {
@@ -339,8 +339,8 @@ Commands:
   tokenopt benchmark codex-daily --repo <path> [--mode all]
   tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline,mcp-first|router-best]
   tokenopt instructions audit
-  tokenopt instructions emit --target agents|codex|copilot
-  tokenopt instructions install --target agents|codex|copilot
+  tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
+  tokenopt instructions install --target agents|codex|copilot|copilot-path|copilot-agent
   tokenopt report
   tokenopt doctor
   tokenopt doctor codex-hooks

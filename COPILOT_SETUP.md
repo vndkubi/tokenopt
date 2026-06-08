@@ -10,6 +10,8 @@ Implemented:
 - One-command project setup: `tokenopt setup copilot`
 - Alias for install flows: `tokenopt install copilot`
 - Copilot custom instructions: `.github/copilot-instructions.md`
+- Copilot path-specific instructions: `.github/instructions/tokenopt.instructions.md`
+- Copilot custom agent profile: `.github/agents/tokenopt-cost-gate.agent.md`
 - Agent instructions: `AGENTS.md`
 - Instruction audit: `tokenopt instructions audit`
 - Copilot setup verification: `tokenopt doctor copilot`
@@ -26,6 +28,8 @@ Not implemented yet:
 | --- | --- | --- |
 | MCP server | Yes | `tokenopt setup copilot --scope user` merges `tokenopt` into `<home>/.copilot/mcp-config.json`. |
 | Repo instructions | Yes | `tokenopt setup copilot` writes `.github/copilot-instructions.md`. |
+| Path instructions | Recommended | `tokenopt setup copilot` writes `.github/instructions/tokenopt.instructions.md` with `applyTo: "**"`. |
+| Custom agent | Recommended | `tokenopt setup copilot` writes `.github/agents/tokenopt-cost-gate.agent.md`. |
 | Agent instructions | Recommended | `tokenopt setup copilot` writes `AGENTS.md` by default; use `--no-agents` to skip. |
 | Skills | No for V1 | TokenOpt is not packaged as a Copilot skill. MCP + instructions are enough for current behavior. |
 | Hooks | Not yet | Do not install Copilot hooks until `tokenopt hook copilot ...` exists. |
@@ -71,6 +75,8 @@ Expected result:
 
 ```text
 .github/copilot-instructions.md
+.github/instructions/tokenopt.instructions.md
+.github/agents/tokenopt-cost-gate.agent.md
 AGENTS.md
 <home>/.copilot/mcp-config.json
 ```
@@ -150,6 +156,8 @@ For each repo where Copilot should use TokenOpt:
 ```powershell
 cd <target-repo>
 node <tokenopt-repo>\dist\cli.js instructions install --target copilot
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot-path
+node <tokenopt-repo>\dist\cli.js instructions install --target copilot-agent
 node <tokenopt-repo>\dist\cli.js instructions install --target agents
 ```
 
@@ -157,6 +165,8 @@ This creates or updates:
 
 ```text
 .github/copilot-instructions.md
+.github/instructions/tokenopt.instructions.md
+.github/agents/tokenopt-cost-gate.agent.md
 AGENTS.md
 ```
 
@@ -178,6 +188,8 @@ Please help me write unit tests for OrderService
 should be routed by the instruction layer. The exact MCP tool name belongs in `.github/copilot-instructions.md`, `AGENTS.md`, or Codex hook context, not in every user prompt.
 
 Do not paste benchmark or setup-injection text into the chat prompt. Lines such as `Project instruction injected by TokenOpt setup:`, `The user may ask naturally...`, or `When TokenOpt MCP tools are available...` are internal setup/report text. Pasting them into a normal task duplicates instructions and commonly increases input tokens.
+
+Important: Copilot instructions are a soft routing signal, not a hard enforcement boundary. If a Copilot surface does not load repository instructions or does not select the custom agent, it may ignore TokenOpt unless the prompt names the tool. Verify instruction loading before measuring cost.
 
 ### 3. Verify inside Copilot CLI
 
@@ -208,6 +220,13 @@ Expected behavior:
 - Copilot sees `tokenopt` MCP.
 - Copilot calls `tokenopt_compile_evidence`.
 - If the packet is answerable, Copilot stops gathering evidence and answers.
+
+If it does not call TokenOpt for natural prompts:
+
+- In Copilot Chat, expand response references and confirm `.github/copilot-instructions.md` or `.github/instructions/tokenopt.instructions.md` is listed.
+- In Copilot CLI, run `/agent` and confirm `tokenopt-cost-gate` is available for broad repo/business/planning tasks.
+- Run `/mcp show tokenopt` and confirm `tokenopt_compile_evidence`, `tokenopt_search`, and `tokenopt_read_file` are enabled.
+- If the instruction files are not referenced, fix Copilot settings for custom instructions before benchmarking.
 
 ## Setup Option C: Interactive `/mcp add`
 
@@ -342,6 +361,8 @@ Check:
 - `npm.cmd run build` was run after code changes.
 - `mcp-config.json` is valid JSON.
 - Tool names are allowlisted correctly.
+- `.github/instructions/tokenopt.instructions.md` exists and contains `applyTo: "**"`.
+- `.github/agents/tokenopt-cost-gate.agent.md` exists if your Copilot surface supports project custom agents.
 
 If Copilot still uses shell too much:
 
