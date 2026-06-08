@@ -82,6 +82,8 @@ In this mode, shell commands, searches, and file reads can be routed through Tok
 
 When a prompt names a specific target such as a module, class, route, flow, or business capability, TokenOpt requires packet evidence to mention that target before `answerable=true`. If target-specific evidence is missing, the packet stays `answerable=false`, marks `target_specific_evidence=missing`, and returns exact TokenOpt followups instead of letting the agent switch to raw shell/search.
 
+To avoid MCP overhead becoming larger than the saved context, `tokenopt_compile_evidence` returns compact output by default and only returns a small `packetSummary` in structured content. The full packet is stored in `state_path`. Use `detail=full` or `include_structured_packet=true` only for debugging, quality audits, or benchmark reports.
+
 MCP tools also need agent instructions. Emit or install the reusable prompt snippet:
 
 ```bash

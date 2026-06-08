@@ -137,6 +137,7 @@ test("mcp compiles business deep-dive evidence and gates grep fallback", async (
         arguments: {
           task: "study business and deep dive that business and explain detail for me",
           cwd: repo,
+          detail: "full",
           quality_rubric: ["explain what why how", "identify users", "map business to project areas"]
         }
       });
@@ -186,6 +187,7 @@ test("mcp does not mark target-specific business task answerable without target 
         arguments: {
           task: "study returns business and deep dive that business and explain detail for me",
           cwd: repo,
+          detail: "full",
           quality_rubric: ["explain target-specific business evidence"]
         }
       });
@@ -231,6 +233,7 @@ test("mcp compiles existing flow packet for diagramming and routes fallback to T
         arguments: {
           task: "Understand checkout flow end-to-end so I can draw Mermaid sequence diagram and explain business",
           cwd: repo,
+          detail: "full",
           quality_rubric: ["actors and trigger", "step-by-step call chain", "business state changes", "mermaid diagram"]
         }
       });
@@ -253,6 +256,52 @@ test("mcp compiles existing flow packet for diagramming and routes fallback to T
       });
       assert.equal(search.isError ?? false, false);
       assert.match(search.content[0].text, /TokenOpt search summary/);
+    },
+    { cwd: repo }
+  );
+});
+
+test("mcp compile evidence defaults to compact output and summary structured content", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-compact-repo-"));
+  fs.mkdirSync(path.join(repo, "src"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "compact-fixture", version: "1.0.0", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.writeFileSync(path.join(repo, "README.md"), "Compact Fixture\n\nThis repository demonstrates compact TokenOpt evidence output for build handoff tasks.\n");
+  fs.writeFileSync(path.join(repo, "src", "index.ts"), "export const value = 1;\n");
+
+  await withTokenOptMcp(
+    async (client) => {
+      const compact = await client.callTool({
+        name: "tokenopt_compile_evidence",
+        arguments: {
+          task: "Prepare a daily build handoff for this repo",
+          task_type: "build_handoff",
+          cwd: repo,
+          quality_rubric: ["identify build tool", "list scripts"]
+        }
+      });
+      const full = await client.callTool({
+        name: "tokenopt_compile_evidence",
+        arguments: {
+          task: "Prepare a daily build handoff for this repo",
+          task_type: "build_handoff",
+          cwd: repo,
+          detail: "full",
+          include_structured_packet: true,
+          quality_rubric: ["identify build tool", "list scripts"]
+        }
+      });
+
+      assert.equal(compact.isError ?? false, false);
+      assert.equal(full.isError ?? false, false);
+      assert.match(compact.content[0].text, /TokenOpt evidence packet compact/);
+      assert.ok(compact.content[0].text.length < full.content[0].text.length);
+      assert.ok(compact.content[0].text.length < 4000);
+      assert.equal(compact.structuredContent.packet, undefined);
+      assert.equal(compact.structuredContent.packetSummary.answerable, true);
+      assert.equal(full.structuredContent.packet.answerable, true);
     },
     { cwd: repo }
   );
@@ -286,6 +335,7 @@ test("mcp compiles answerable evidence and gates redundant exploration", async (
           task: "Prepare a daily build handoff for this repo",
           task_type: "build_handoff",
           cwd: repo,
+          detail: "full",
           quality_rubric: ["identify build tool", "list scripts"]
         }
       });

@@ -132,6 +132,8 @@ Expected agent flow:
 
 For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", TokenOpt infers `task_type=api_flow`, identifies candidate entrypoints/services/tests/docs, returns a diagram contract, quality checks, and requires exact `tokenopt_search`/`tokenopt_read_file` followups before the final diagram. For prompts such as "study business and deep dive that business", TokenOpt infers `task_type=research_business` and includes business purpose, likely users, core capabilities, major project areas, domain terms, doc signals, required sections, evidence rules, and final-answer quality checks in the evidence packet.
 
+`tokenopt_compile_evidence` defaults to compact output. Full evidence is saved in `state_path`; pass `detail=full` only when debugging or producing a benchmark/audit report.
+
 ## Codex Hooks Setup
 
 Hooks are useful as guardrails, but they are weaker than strict MCP mode because hook firing and trust are controlled by the host Codex environment.

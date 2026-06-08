@@ -303,7 +303,8 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
       arguments: args
     });
     const compileText = toolText(compile);
-    const compilePacket = (compile as { structuredContent?: { packet?: { answerable?: boolean } } }).structuredContent?.packet;
+    const structured = (compile as { structuredContent?: { packet?: { answerable?: boolean }; packetSummary?: { answerable?: boolean } } }).structuredContent;
+    const compilePacket = structured?.packetSummary ?? structured?.packet;
     const answerable = compilePacket?.answerable ?? /answerable:\s*true/.test(compileText);
     const signals = signalsFromCompiledPacket(compileText);
     const answer = renderAnswer(task, signals, mode);

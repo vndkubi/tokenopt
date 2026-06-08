@@ -24,6 +24,7 @@ import type {
 } from "./types.js";
 
 type SearchProvider = "rg" | "git" | "node";
+type EvidenceDetail = "compact" | "full";
 
 interface RepoInventory {
   totalFiles: number;
@@ -60,7 +61,7 @@ interface RepositoryOverview {
 }
 
 const SERVER_INSTRUCTIONS =
-  "TokenOpt provides bounded repo tools and an evidence compiler. Start with tokenopt_compile_evidence for repo understanding, existing-flow deep dives/diagrams, business/domain deep dives, onboarding/build handoffs, investigations, implementation planning, and test planning. If it returns answerable=true, answer from the packet instead of replaying shell/search/read calls. If answerable=false, use only the packet's allowed TokenOpt followups. Use tokenopt_search/read_file only for exact gaps and tokenopt_run_command for tests/builds so raw output is archived and model-visible output stays compact.";
+  "Use tokenopt_compile_evidence first for repo/flow/business/plan/test tasks. If answerable=true, answer from it. If false, use only its allowed TokenOpt followups.";
 
 export async function runMcpServer(): Promise<void> {
   const server = new Server(
@@ -81,12 +82,11 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_compile_evidence",
         title: "Compile Answerability Evidence",
-        description:
-          "Build a compact evidence packet for a task and decide whether more tool calls are justified.",
+        description: "Compile compact task evidence and followup policy.",
         inputSchema: {
           type: "object",
           properties: {
-            task: { type: "string", description: "The user task to answer or plan." },
+            task: { type: "string", description: "User task." },
             task_type: {
               type: "string",
               enum: [
@@ -101,18 +101,27 @@ export async function runMcpServer(): Promise<void> {
                 "build_handoff",
                 "unknown"
               ],
-              description: "Optional task category. Defaults to deterministic inference."
+              description: "Task category."
             },
             budget_tokens: {
               type: "number",
-              description: "Approximate max tokens for the evidence packet. Defaults to 1600."
+              description: "Evidence budget."
             },
             quality_rubric: {
               type: "array",
               items: { type: "string" },
-              description: "Optional checklist the packet must cover."
+              description: "Quality checklist."
             },
-            cwd: { type: "string", description: "Optional working directory. Defaults to the MCP server cwd." }
+            detail: {
+              type: "string",
+              enum: ["compact", "full"],
+              description: "compact default; full for debugging."
+            },
+            include_structured_packet: {
+              type: "boolean",
+              description: "Return full structured packet."
+            },
+            cwd: { type: "string", description: "Working directory." }
           },
           required: ["task"],
           additionalProperties: false
@@ -128,13 +137,12 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_run_command",
         title: "Run Command Through TokenOpt",
-        description:
-          "Run a shell command through TokenOpt policy and output compression. Raw output is stored as an artifact.",
+        description: "Run command with policy and compact output.",
         inputSchema: {
           type: "object",
           properties: {
-            command: { type: "string", description: "Shell command to run." },
-            cwd: { type: "string", description: "Optional working directory. Defaults to the MCP server cwd." }
+            command: { type: "string", description: "Shell command." },
+            cwd: { type: "string", description: "Working directory." }
           },
           required: ["command"],
           additionalProperties: false
@@ -150,13 +158,13 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_search",
         title: "Search Repository Through TokenOpt",
-        description: "Run a targeted repository search with TokenOpt output compression. Uses rg when available, then git, then a bounded Node scanner.",
+        description: "Targeted repo search with compact output.",
         inputSchema: {
           type: "object",
           properties: {
-            pattern: { type: "string", description: "Non-empty search pattern. Broad '.' searches are denied." },
-            path: { type: "string", description: "Optional repo-relative path to search. Defaults to '.'." },
-            cwd: { type: "string", description: "Optional working directory. Defaults to the MCP server cwd." }
+            pattern: { type: "string", description: "Search pattern." },
+            path: { type: "string", description: "Repo-relative path." },
+            cwd: { type: "string", description: "Working directory." }
           },
           required: ["pattern"],
           additionalProperties: false
@@ -172,14 +180,14 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_read_file",
         title: "Read Bounded File Slice",
-        description: "Read a bounded slice of a source file. Lockfiles and generated outputs are denied by policy.",
+        description: "Read bounded source slice.",
         inputSchema: {
           type: "object",
           properties: {
-            path: { type: "string", description: "Repo-relative file path." },
-            startLine: { type: "number", description: "1-based start line. Defaults to 1." },
-            maxLines: { type: "number", description: "Maximum lines to return. Defaults to 200, capped at 400." },
-            cwd: { type: "string", description: "Optional working directory. Defaults to the MCP server cwd." }
+            path: { type: "string", description: "Repo-relative file." },
+            startLine: { type: "number", description: "1-based start line." },
+            maxLines: { type: "number", description: "Max lines, capped at 400." },
+            cwd: { type: "string", description: "Working directory." }
           },
           required: ["path"],
           additionalProperties: false
@@ -195,12 +203,11 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_project_facts",
         title: "Extract Project Build Facts",
-        description:
-          "Return deterministic build-system facts from common repo files, plus compact repo inventory. Use this for daily onboarding/build handoff tasks.",
+        description: "Return compact build and inventory facts.",
         inputSchema: {
           type: "object",
           properties: {
-            cwd: { type: "string", description: "Optional working directory. Defaults to the MCP server cwd." }
+            cwd: { type: "string", description: "Working directory." }
           },
           additionalProperties: false
         },
@@ -247,6 +254,8 @@ function compileEvidenceTool(args: Record<string, unknown>) {
   const taskType = normalizeTaskType(optionalString(args, "task_type"), task);
   const budgetTokens = clampInteger(optionalNumber(args, "budget_tokens") ?? 1600, 400, 8000);
   const qualityRubric = optionalStringArray(args, "quality_rubric").slice(0, 12);
+  const detail = normalizeEvidenceDetail(optionalString(args, "detail"));
+  const includeStructuredPacket = optionalBoolean(args, "include_structured_packet") ?? false;
   const inventory = buildRepoInventory(loaded.repoRoot, loaded.config, loaded.repoRoot);
   const facts = extractProjectFacts(loaded.repoRoot);
   const factFiles = factSourceFiles(facts);
@@ -409,10 +418,7 @@ function compileEvidenceTool(args: Record<string, unknown>) {
     }
   });
 
-  return textResult(formatEvidencePacket(packet, statePath), false, {
-    packet,
-    statePath
-  });
+  return textResult(formatEvidencePacket(packet, statePath, detail), false, buildEvidenceStructuredContent(packet, statePath, includeStructuredPacket));
 }
 
 async function runCommandTool(args: Record<string, unknown>) {
@@ -2142,7 +2148,90 @@ function factSourceFiles(facts: string[]): string[] {
   return [...files].sort();
 }
 
-function formatEvidencePacket(packet: EvidencePacket, statePath: string | undefined): string {
+function normalizeEvidenceDetail(value: string | undefined): EvidenceDetail {
+  return value === "full" ? "full" : "compact";
+}
+
+function buildEvidenceStructuredContent(packet: EvidencePacket, statePath: string, includePacket: boolean): Record<string, unknown> {
+  const packetSummary = {
+    packet_id: packet.packet_id,
+    task_type: packet.task_type,
+    answerable: packet.answerable,
+    confidence: packet.confidence,
+    recommended_next_action: packet.recommended_next_action,
+    max_additional_calls: packet.max_additional_calls,
+    statePath,
+    missing_count: packet.missing.length,
+    allowed_followups: packet.allowed_followups.map((followup) => ({
+      tool: followup.tool,
+      reason: followup.reason,
+      args: followup.args,
+      max_output_tokens: followup.max_output_tokens
+    })),
+    answer_contract: {
+      required_sections: packet.answer_contract.required_sections,
+      quality_checks: packet.answer_contract.quality_checks.slice(0, 8)
+    }
+  };
+  return includePacket
+    ? { packetSummary, packet, statePath }
+    : { packetSummary, statePath };
+}
+
+function formatEvidencePacket(packet: EvidencePacket, statePath: string | undefined, detail: EvidenceDetail): string {
+  if (detail === "full") {
+    return formatFullEvidencePacket(packet, statePath);
+  }
+  return formatCompactEvidencePacket(packet, statePath);
+}
+
+function formatCompactEvidencePacket(packet: EvidencePacket, statePath: string | undefined): string {
+  const coverage = Object.entries(packet.coverage)
+    .filter(([, value]) => value !== "covered")
+    .slice(0, 10)
+    .map(([key, value]) => `${key}=${value}`);
+  const evidenceLines = packet.evidence.slice(0, 8).flatMap((item) => {
+    const facts = (item.facts ?? []).slice(0, 5).join(" | ");
+    const files = (item.files ?? []).slice(0, 5).join(",");
+    return [
+      `- ${item.id}: ${item.claim}`,
+      files ? `  files=${files}` : undefined,
+      facts ? `  facts=${facts}` : undefined
+    ].filter((line): line is string => Boolean(line));
+  });
+  const lines = [
+    "TokenOpt evidence packet compact",
+    `packet_id: ${packet.packet_id}`,
+    `task_type: ${packet.task_type}`,
+    `answerable: ${packet.answerable}`,
+    `confidence: ${packet.confidence}`,
+    `recommended_next_action: ${packet.recommended_next_action}`,
+    `max_additional_calls: ${packet.max_additional_calls}`,
+    statePath ? `state_path: ${statePath}` : undefined,
+    coverage.length > 0 ? `coverage_gaps: ${coverage.join(", ")}` : "coverage_gaps: none",
+    "",
+    "Evidence:",
+    ...evidenceLines,
+    "",
+    "Answer contract:",
+    `required_sections=${packet.answer_contract.required_sections.join(" | ")}`,
+    `quality_checks=${packet.answer_contract.quality_checks.slice(0, 8).join(" | ")}`,
+    `evidence_rules=${packet.answer_contract.evidence_rules.slice(0, 4).join(" | ")}`,
+    "",
+    "Missing:",
+    ...(packet.missing.length > 0 ? packet.missing.slice(0, 8).map((item) => `- ${item}`) : ["- none"]),
+    "",
+    "Allowed followups:",
+    ...(packet.allowed_followups.length > 0
+      ? packet.allowed_followups.slice(0, 5).map((followup) => `- ${followup.tool}: ${followup.reason}`)
+      : ["- none"]),
+    "",
+    "TokenOpt compact mode: full packet is stored in state_path; call tokenopt_compile_evidence with detail=full only when debugging."
+  ].filter((line): line is string => line !== undefined);
+  return lines.join("\n");
+}
+
+function formatFullEvidencePacket(packet: EvidencePacket, statePath: string | undefined): string {
   const lines = [
     "TokenOpt compiled evidence packet",
     `packet_id: ${packet.packet_id}`,
@@ -2421,6 +2510,11 @@ function optionalString(args: Record<string, unknown>, key: string): string | un
 function optionalNumber(args: Record<string, unknown>, key: string): number | undefined {
   const value = args[key];
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function optionalBoolean(args: Record<string, unknown>, key: string): boolean | undefined {
+  const value = args[key];
+  return typeof value === "boolean" ? value : undefined;
 }
 
 function optionalStringArray(args: Record<string, unknown>, key: string): string[] {
