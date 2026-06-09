@@ -7,12 +7,15 @@ import { setupCopilotProject, type CopilotSetupScope } from "./copilot-setup.js"
 import { runSuiteBenchmarkCommand } from "./suite-benchmark.js";
 import { loadConfig, makeDefaultRepoConfig, ensureConfigDir } from "./config.js";
 import { handleCodexHook } from "./codex-adapter.js";
+import { handleCopilotHook } from "./copilot-adapter.js";
 import { runCodexHooksDoctor, runCopilotDoctor, runDoctor } from "./doctor.js";
 import { runWrappedCommand } from "./exec.js";
 import { installCodexHooks } from "./install.js";
 import {
   auditInstructions,
   emitTokenOptInstructions,
+  formatInstructionGraphPlan,
+  installInstructionGraph,
   installTokenOptInstructions,
   type InstructionTarget
 } from "./instruction-audit.js";
@@ -94,6 +97,16 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
     return 0;
   }
 
+  if (command === "hook" && subcommand === "copilot") {
+    const eventName = rest[0] as TokenOptHookEventName | undefined;
+    if (!eventName || !HOOK_EVENTS.has(eventName)) {
+      process.stderr.write("Usage: tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact\n");
+      return 2;
+    }
+    await handleCopilotHook(eventName);
+    return 0;
+  }
+
   if (command === "exec") {
     const separatorIndex = argv.indexOf("--");
     const commandArgs = separatorIndex >= 0 ? argv.slice(separatorIndex + 1) : argv.slice(1);
@@ -137,6 +150,27 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   if (command === "instructions" && subcommand === "emit") {
     const target = parseInstructionTarget(rest, "generic");
     process.stdout.write(`${emitTokenOptInstructions(target)}\n`);
+    return 0;
+  }
+
+  if (command === "instructions" && subcommand === "graph") {
+    const loaded = loadConfig();
+    process.stdout.write(`${formatInstructionGraphPlan(loaded.repoRoot)}\n`);
+    return 0;
+  }
+
+  if (command === "instructions" && subcommand === "install-graph") {
+    const loaded = loadConfig();
+    const files = installInstructionGraph(loaded.repoRoot);
+    appendEvent(loaded.config, {
+      timestamp: new Date().toISOString(),
+      source: "cli",
+      eventName: "instructions-install-graph",
+      repoRoot: loaded.repoRoot,
+      action: "install",
+      metadata: { files }
+    });
+    process.stdout.write(`Installed TokenOpt instruction graph:\n${files.map((filePath) => `- ${filePath}`).join("\n")}\n`);
     return 0;
   }
 
@@ -333,6 +367,7 @@ Commands:
   tokenopt setup copilot --scope user|repo|both [--no-agents] [--include-run-command]
   tokenopt install copilot --scope user|repo|both [--no-agents] [--include-run-command]
   tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
+  tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt exec -- <command...>
   tokenopt mcp [--mode lite|full]
   tokenopt benchmark daily --repo <path> [--mode all]
@@ -340,6 +375,8 @@ Commands:
   tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline,mcp-first|router-best]
   tokenopt instructions audit
   tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
+  tokenopt instructions graph
+  tokenopt instructions install-graph
   tokenopt instructions install --target agents|codex|copilot|copilot-path|copilot-agent
   tokenopt report
   tokenopt doctor

@@ -1,6 +1,9 @@
 import type { CompressionResult } from "./types.js";
 import { compressBuildLog, looksLikeBuildLog } from "./compressors/build-log-compressor.js";
+import { compressErrorSummary, looksLikeErrorSummary } from "./compressors/error-compressor.js";
 import { compressJavaTrace, looksLikeJavaTrace } from "./compressors/java-trace-compressor.js";
+import { compressJsonResult, looksLikeJsonResult } from "./compressors/json-result-compressor.js";
+import { compressReviewFindings, looksLikeReviewFindings } from "./compressors/review-findings.js";
 
 const DEFAULT_LIMIT = 12_000;
 
@@ -43,7 +46,16 @@ export function compressText(text: string, limitChars = DEFAULT_LIMIT): Compress
   if (looksLikeBuildLog(normalized)) {
     return compressBuildLog(normalized, limitChars);
   }
+  if (looksLikeJsonResult(normalized)) {
+    return compressJsonResult(normalized, limitChars);
+  }
   const kind = detectKind(normalized);
+  if (kind === "generic" && looksLikeReviewFindings(normalized)) {
+    return compressReviewFindings(normalized, limitChars);
+  }
+  if (kind === "generic" && looksLikeErrorSummary(normalized)) {
+    return compressErrorSummary(normalized, limitChars);
+  }
   const lines = normalized.split("\n");
   const summaryLines = selectSummaryLines(lines, kind);
   const header = [
@@ -63,7 +75,7 @@ export function compressText(text: string, limitChars = DEFAULT_LIMIT): Compress
 }
 
 export function shouldCompressOutput(text: string, maxChars: number): boolean {
-  if (looksLikeJavaTrace(text) || looksLikeBuildLog(text)) {
+  if (looksLikeJavaTrace(text) || looksLikeBuildLog(text) || looksLikeJsonResult(text) || looksLikeReviewFindings(text) || looksLikeErrorSummary(text)) {
     return true;
   }
   if (text.length > maxChars) {

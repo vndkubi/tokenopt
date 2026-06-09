@@ -12,6 +12,18 @@ interface AuditFile {
   conflicts: string[];
 }
 
+export interface InstructionGraphFile {
+  path: string;
+  content: string;
+  estimatedTokens: number;
+}
+
+export interface InstructionGraphPlan {
+  files: InstructionGraphFile[];
+  totalEstimatedTokens: number;
+  warnings: string[];
+}
+
 export function auditInstructions(repoRoot: string): string {
   const files = findInstructionFiles(repoRoot);
   if (files.length === 0) {
@@ -181,6 +193,125 @@ export function installTokenOptInstructions(repoRoot: string, target: Exclude<In
     : `${existing.trimEnd()}${existing.trim().length > 0 ? "\n\n" : ""}${block}\n`;
   fs.writeFileSync(filePath, next, "utf8");
   return filePath;
+}
+
+export function buildInstructionGraph(repoRoot: string): InstructionGraphPlan {
+  const files: InstructionGraphFile[] = [
+    graphFile(path.join(repoRoot, ".github", "copilot-instructions.md"), rootInstructionGraphContent()),
+    graphFile(path.join(repoRoot, ".github", "instructions", "tokenopt-review.instructions.md"), reviewInstructionGraphContent()),
+    graphFile(path.join(repoRoot, ".github", "instructions", "tokenopt-runtime.instructions.md"), runtimeInstructionGraphContent()),
+    graphFile(path.join(repoRoot, "AGENTS.md"), agentsInstructionGraphContent())
+  ];
+  const totalEstimatedTokens = files.reduce((sum, file) => sum + file.estimatedTokens, 0);
+  const warnings = [
+    totalEstimatedTokens > 2000 ? `Instruction graph is ${totalEstimatedTokens} estimated tokens; keep root instructions short and path-specific guidance scoped.` : undefined,
+    ...files.flatMap((file) => file.estimatedTokens > 900 ? [`${path.relative(repoRoot, file.path)} is ${file.estimatedTokens} estimated tokens; consider shortening.`] : [])
+  ].filter((warning): warning is string => Boolean(warning));
+  return { files, totalEstimatedTokens, warnings };
+}
+
+export function formatInstructionGraphPlan(repoRoot: string, plan = buildInstructionGraph(repoRoot)): string {
+  return [
+    "TokenOpt instruction graph plan",
+    `repo: ${repoRoot}`,
+    `files: ${plan.files.length}`,
+    `estimatedTokens: ${plan.totalEstimatedTokens}`,
+    "",
+    "Files:",
+    ...plan.files.map((file) => `- ${path.relative(repoRoot, file.path)} (${file.estimatedTokens} est tokens)`),
+    "",
+    "Warnings:",
+    ...(plan.warnings.length > 0 ? plan.warnings.map((warning) => `- ${warning}`) : ["- none"])
+  ].join("\n");
+}
+
+export function installInstructionGraph(repoRoot: string): string[] {
+  const plan = buildInstructionGraph(repoRoot);
+  const written: string[] = [];
+  for (const file of plan.files) {
+    fs.mkdirSync(path.dirname(file.path), { recursive: true });
+    if (path.basename(file.path) === "AGENTS.md" || path.basename(file.path) === "copilot-instructions.md") {
+      writeMarkedInstructionBlock(file.path, file.content);
+    } else {
+      fs.writeFileSync(file.path, `${file.content.trimEnd()}\n`, "utf8");
+    }
+    written.push(file.path);
+  }
+  return written;
+}
+
+function graphFile(filePath: string, content: string): InstructionGraphFile {
+  return {
+    path: filePath,
+    content,
+    estimatedTokens: estimateTokens(content.length)
+  };
+}
+
+function rootInstructionGraphContent(): string {
+  return [
+    "# TokenOpt ContextGate",
+    "",
+    "Use TokenOpt as a selective context governor, not as MCP-first for every prompt.",
+    "",
+    "- Broad repo, business/domain, build handoff, flow, review diff, runtime debug, and refactor-scope tasks may use TokenOpt evidence first.",
+    "- Exact file/class/method tasks and small-repo direct edits should use normal narrow search/read unless the user asks for TokenOpt.",
+    "- If a packet says answerable=true, answer from it and avoid broad fallback.",
+    "- For code changes, prefer unified diffs or compact edit plans instead of full-file rewrites."
+  ].join("\n");
+}
+
+function reviewInstructionGraphContent(): string {
+  return [
+    "---",
+    "applyTo: \"**/*.{java,ts,tsx,js,jsx,py,go,rs,kt,scala,cs}\"",
+    "---",
+    "",
+    "# TokenOpt Review Tasks",
+    "",
+    "For PR/diff/code-review prompts, prefer task-shaped review evidence.",
+    "",
+    "- Use `tokenopt_compile_evidence` with `task_type=review_diff` when the prompt contains a concrete diff.",
+    "- In MCP full mode, use `tokenopt_prepare_java_diff` for Java diffs and `tokenopt_business_contract` for API/schema/security/messaging/test contracts.",
+    "- Report compact findings with file, line, severity, evidence, and suggestion.",
+    "- Do not spend tokens on import reorder, whitespace, or Lombok-only changes unless they affect compile/runtime behavior."
+  ].join("\n");
+}
+
+function runtimeInstructionGraphContent(): string {
+  return [
+    "---",
+    "applyTo: \"**/*.{java,xml,yml,yaml,properties,gradle}\"",
+    "---",
+    "",
+    "# TokenOpt Runtime And Java Tasks",
+    "",
+    "- Compress Java stack traces and Maven/Gradle logs before carrying them forward.",
+    "- Preserve Caused by chains, user-code frames, first framework boundary, failing tests, and final build stats.",
+    "- In MCP full mode, use `tokenopt_jakarta_annotation_filter` for Lombok-heavy entities and `tokenopt_assemble_spring_context` for actuator/beans JSON.",
+    "- Allow one exact follow-up when runtime evidence is incomplete; avoid broad repo search after an answerable packet."
+  ].join("\n");
+}
+
+function agentsInstructionGraphContent(): string {
+  return [
+    "## TokenOpt ContextGate",
+    "",
+    "Use TokenOpt selectively. Broad/review/debug/refactor tasks can use evidence packets; exact direct-file tasks should stay narrow.",
+    "Respect coverage certificates: if answerable=true and missing=[], answer without broad fallback.",
+    "Use compact diffs/edit plans for code changes and keep output concise."
+  ].join("\n");
+}
+
+function writeMarkedInstructionBlock(filePath: string, content: string): void {
+  const markerStart = "<!-- tokenopt:instruction-graph:start -->";
+  const markerEnd = "<!-- tokenopt:instruction-graph:end -->";
+  const block = `${markerStart}\n${content.trimEnd()}\n${markerEnd}`;
+  const existing = fs.existsSync(filePath) ? fs.readFileSync(filePath, "utf8") : "";
+  const next = existing.includes(markerStart) && existing.includes(markerEnd)
+    ? existing.replace(new RegExp(`${escapeRegExp(markerStart)}[\\s\\S]*?${escapeRegExp(markerEnd)}`), block)
+    : `${existing.trimEnd()}${existing.trim().length > 0 ? "\n\n" : ""}${block}\n`;
+  fs.writeFileSync(filePath, next, "utf8");
 }
 
 function instructionTargetPath(repoRoot: string, target: Exclude<InstructionTarget, "generic">): string {

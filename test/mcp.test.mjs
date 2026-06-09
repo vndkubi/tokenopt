@@ -52,7 +52,12 @@ test("mcp full mode exposes command and project facts tools", async () => {
       const result = await client.listTools();
       const names = result.tools.map((tool) => tool.name).sort();
       assert.deepEqual(names, [
+        "tokenopt_assemble_spring_context",
+        "tokenopt_business_contract",
         "tokenopt_compile_evidence",
+        "tokenopt_impact_analysis",
+        "tokenopt_jakarta_annotation_filter",
+        "tokenopt_prepare_java_diff",
         "tokenopt_project_facts",
         "tokenopt_read_file",
         "tokenopt_run_command",

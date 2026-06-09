@@ -116,7 +116,18 @@ export interface PolicyDecision {
 }
 
 export interface CompressionResult {
-  kind: "vitest" | "jest" | "pytest" | "tsc" | "eslint" | "java-trace" | "build-log" | "generic";
+  kind:
+    | "vitest"
+    | "jest"
+    | "pytest"
+    | "tsc"
+    | "eslint"
+    | "java-trace"
+    | "build-log"
+    | "json-result"
+    | "review-findings"
+    | "error-summary"
+    | "generic";
   text: string;
   originalChars: number;
   compressedChars: number;

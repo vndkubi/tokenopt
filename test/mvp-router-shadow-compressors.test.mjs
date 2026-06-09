@@ -73,7 +73,7 @@ test("shadow answerability gate logs would-deny without blocking", () => {
   );
 
   assert.equal(decision.action, "context");
-  assert.match(decision.reason, /shadow gate would block/);
+  assert.match(decision.reason, /shadow gate would deny/);
   assert.equal(decision.metadata.shadowGate.wouldDeny, true);
 
   const events = readRepoEvents(loaded.config, loaded.repoRoot);

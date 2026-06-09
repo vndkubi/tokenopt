@@ -5,12 +5,17 @@ import { spawnSync } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { assembleSpringContext } from "./assemblers/spring-context-assembler.js";
 import { loadConfig } from "./config.js";
 import { readActiveEvidenceTaskState, writeEvidenceTaskState } from "./evidence-state.js";
 import { executeWrappedShellCommand } from "./exec.js";
+import { filterJakartaAnnotations } from "./filters/jakarta-annotation-filter.js";
 import { compressText } from "./log-compressor.js";
 import { appendEvent, writeArtifact } from "./observability.js";
 import { evaluatePolicy } from "./policy-core.js";
+import { linkBusinessContracts } from "./processors/business-contract-linker.js";
+import { analyzeImpact } from "./processors/impact-analysis.js";
+import { prepareJavaDiff } from "./processors/java-diff-processor.js";
 import { routeTask } from "./router.js";
 import { evaluateShadowGate, logShadowGateDecision } from "./shadow-gate.js";
 import type {
@@ -33,7 +38,16 @@ type EvidenceDetail = "compact" | "full";
 type McpMode = "lite" | "full";
 
 const LITE_MCP_TOOL_NAMES = new Set(["tokenopt_compile_evidence", "tokenopt_search", "tokenopt_read_file"]);
-const FULL_MCP_TOOL_NAMES = new Set([...LITE_MCP_TOOL_NAMES, "tokenopt_run_command", "tokenopt_project_facts"]);
+const FULL_MCP_TOOL_NAMES = new Set([
+  ...LITE_MCP_TOOL_NAMES,
+  "tokenopt_run_command",
+  "tokenopt_project_facts",
+  "tokenopt_prepare_java_diff",
+  "tokenopt_jakarta_annotation_filter",
+  "tokenopt_assemble_spring_context",
+  "tokenopt_business_contract",
+  "tokenopt_impact_analysis"
+]);
 
 interface RepoInventory {
   totalFiles: number;
@@ -228,6 +242,115 @@ export async function runMcpServer(): Promise<void> {
           idempotentHint: true,
           openWorldHint: false
         }
+      },
+      {
+        name: "tokenopt_prepare_java_diff",
+        title: "Prepare Java Diff",
+        description: "Compress and classify Java diff hunks for review/refactor evidence.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            diff: { type: "string", description: "Unified diff text. If omitted, reads git diff." },
+            cwd: { type: "string", description: "Working directory." },
+            staged: { type: "boolean", description: "Read git diff --cached when diff is omitted." }
+          },
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt prepare Java diff",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      {
+        name: "tokenopt_jakarta_annotation_filter",
+        title: "Filter Jakarta/Lombok Annotations",
+        description: "Collapse low-signal Lombok annotations while preserving Jakarta/JPA annotations.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            code: { type: "string", description: "Java source text." },
+            path: { type: "string", description: "Repo-relative Java file to filter." },
+            cwd: { type: "string", description: "Working directory." }
+          },
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt Jakarta annotation filter",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      {
+        name: "tokenopt_assemble_spring_context",
+        title: "Assemble Spring Context",
+        description: "Compress actuator/beans JSON into entrypoint, security, service, data, messaging, and transaction slices.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            json: { type: "string", description: "Spring actuator/beans JSON text." },
+            path: { type: "string", description: "Repo-relative JSON file to assemble." },
+            cwd: { type: "string", description: "Working directory." }
+          },
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt Spring context assembler",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      {
+        name: "tokenopt_business_contract",
+        title: "Link Business Contracts",
+        description: "Find API, schema, messaging, security, docs, and test contracts relevant to a diff or task.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task: { type: "string", description: "User task or review question." },
+            diff: { type: "string", description: "Unified diff text." },
+            changed_files: { type: "array", items: { type: "string" }, description: "Changed repo-relative files." },
+            cwd: { type: "string", description: "Working directory." }
+          },
+          required: ["task"],
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt business contract linker",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
+      },
+      {
+        name: "tokenopt_impact_analysis",
+        title: "Analyze Impact",
+        description: "Find definitions, usages, hot paths, public contracts, and likely tests for a target symbol or changed files.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            target: { type: "string", description: "Symbol, class, method, route, or behavior to analyze." },
+            diff: { type: "string", description: "Unified diff text." },
+            changed_files: { type: "array", items: { type: "string" }, description: "Changed repo-relative files." },
+            cwd: { type: "string", description: "Working directory." }
+          },
+          required: ["target"],
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt impact analysis",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
       }
   ];
 
@@ -255,6 +378,16 @@ export async function runMcpServer(): Promise<void> {
           return readFileTool(args);
         case "tokenopt_project_facts":
           return projectFactsTool(args);
+        case "tokenopt_prepare_java_diff":
+          return prepareJavaDiffTool(args);
+        case "tokenopt_jakarta_annotation_filter":
+          return jakartaAnnotationFilterTool(args);
+        case "tokenopt_assemble_spring_context":
+          return assembleSpringContextTool(args);
+        case "tokenopt_business_contract":
+          return businessContractTool(args);
+        case "tokenopt_impact_analysis":
+          return impactAnalysisTool(args);
         default:
           return textResult(`Unknown TokenOpt tool: ${request.params.name}`, true);
       }
@@ -1022,6 +1155,218 @@ function projectFactsTool(args: Record<string, unknown>) {
     rawInventoryArtifact: inventory.rawArtifact,
     facts
   });
+}
+
+function prepareJavaDiffTool(args: Record<string, unknown>) {
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
+  const diff = optionalString(args, "diff") ?? readGitDiff(cwd, optionalBoolean(args, "staged") ?? false);
+  if (!diff.trim()) {
+    return textResult("TokenOpt Java diff processor: no diff content found.", false, {
+      changedFiles: [],
+      categories: {},
+      impactedSymbols: [],
+      likelyTests: []
+    });
+  }
+
+  const summary = prepareJavaDiff(diff);
+  const rawArtifact = writeArtifact(loaded.config, loaded.repoRoot, "java-diff.patch", diff);
+  const text = [
+    "TokenOpt Java diff summary",
+    `changedJavaFiles: ${summary.changedFiles.length}`,
+    `originalChars: ${summary.originalChars}`,
+    `summaryChars: ${summary.summaryChars}`,
+    `estimatedTokensSaved: ${summary.estimatedTokensSaved}`,
+    `rawArtifact: ${rawArtifact}`,
+    "",
+    "Categories:",
+    ...Object.entries(summary.categories).map(([category, count]) => `- ${category}: ${count}`),
+    "",
+    "Changed files:",
+    ...summary.changedFiles.slice(0, 24).map((file) => [
+      `- ${file.file}`,
+      `  +/-: ${file.additions}/${file.deletions}`,
+      `  categories: ${file.categories.join(",")}`,
+      `  impactedSymbols: ${file.impactedSymbols.join(",") || "none_detected"}`,
+      `  likelyTests: ${file.likelyTests.slice(0, 4).join(",") || "none_detected"}`
+    ].join("\n")),
+    "",
+    "Review hints:",
+    ...summary.semanticHints.map((hint) => `- ${hint}`)
+  ].join("\n");
+
+  return textResult(text, false, { ...summary, rawArtifact });
+}
+
+function jakartaAnnotationFilterTool(args: Record<string, unknown>) {
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
+  const input = readInlineOrRepoFile(args, loaded, "code");
+  if (!input.ok) {
+    return textResult(input.error, true);
+  }
+
+  const result = filterJakartaAnnotations(input.text);
+  const rawArtifact = writeArtifact(loaded.config, loaded.repoRoot, "jakarta-annotation-source.java", input.text);
+  const filteredArtifact = result.text.length > loaded.config.policy.maxCommandOutputChars
+    ? writeArtifact(loaded.config, loaded.repoRoot, "jakarta-annotation-filtered.java", result.text)
+    : undefined;
+  const filteredText = filteredArtifact
+    ? `${result.text.slice(0, Math.max(0, loaded.config.policy.maxCommandOutputChars - 120))}\n\n[truncated by TokenOpt; filteredArtifact=${filteredArtifact}]`
+    : result.text;
+
+  return textResult(
+    [
+      "TokenOpt Jakarta annotation filter",
+      `source: ${input.source}`,
+      `collapsedGroups: ${result.collapsedGroups}`,
+      `collapsedAnnotations: ${result.collapsedAnnotations.join(",") || "none"}`,
+      `estimatedTokensSaved: ${result.estimatedTokensSaved}`,
+      `rawArtifact: ${rawArtifact}`,
+      filteredArtifact ? `filteredArtifact: ${filteredArtifact}` : undefined,
+      "",
+      filteredText
+    ].filter((line): line is string => line !== undefined).join("\n"),
+    false,
+    { ...result, source: input.source, rawArtifact, filteredArtifact }
+  );
+}
+
+function assembleSpringContextTool(args: Record<string, unknown>) {
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
+  const input = readInlineOrRepoFile(args, loaded, "json");
+  if (!input.ok) {
+    return textResult(input.error, true);
+  }
+
+  const assembly = assembleSpringContext(input.text);
+  const rawArtifact = writeArtifact(loaded.config, loaded.repoRoot, "spring-context-raw.json", input.text);
+  const text = [
+    "TokenOpt Spring context assembly",
+    `source: ${input.source}`,
+    `beanCount: ${assembly.beanCount}`,
+    `originalChars: ${assembly.originalChars}`,
+    `assembledChars: ${assembly.assembledChars}`,
+    `estimatedTokensSaved: ${assembly.estimatedTokensSaved}`,
+    `rawArtifact: ${rawArtifact}`,
+    "",
+    JSON.stringify({
+      entryPoints: assembly.entryPoints,
+      securityChain: assembly.securityChain,
+      services: assembly.services,
+      dataLayer: assembly.dataLayer,
+      messaging: assembly.messaging,
+      transactionBoundaries: assembly.transactionBoundaries
+    }, null, 2)
+  ].join("\n");
+
+  return textResult(text, false, { ...assembly, rawArtifact, source: input.source });
+}
+
+function businessContractTool(args: Record<string, unknown>) {
+  const task = requiredString(args, "task");
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
+  const diff = optionalString(args, "diff") ?? "";
+  const changedFiles = uniqueStrings([
+    ...optionalStringArray(args, "changed_files"),
+    ...extractDiffFiles(diff)
+  ]);
+  const repoFiles = collectRepoFiles(loaded.repoRoot, loaded.repoRoot).files;
+  const result = linkBusinessContracts({ task, changedFiles, repoFiles });
+  const text = [
+    "TokenOpt business contract links",
+    `changedFiles: ${result.changedFiles.join(",") || "none_detected"}`,
+    `candidates: ${result.candidates.length}`,
+    `missingContractTypes: ${result.missingContractTypes.join(",") || "none"}`,
+    "",
+    "Candidates:",
+    ...result.candidates.slice(0, 40).map((candidate) => `- ${candidate.type}: ${candidate.file} (${candidate.reason})`),
+    "",
+    "Review hints:",
+    ...result.reviewHints.map((hint) => `- ${hint}`)
+  ].join("\n");
+  return textResult(text, false, { ...result });
+}
+
+function impactAnalysisTool(args: Record<string, unknown>) {
+  const target = requiredString(args, "target");
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
+  const diff = optionalString(args, "diff") ?? "";
+  const changedFiles = uniqueStrings([
+    ...optionalStringArray(args, "changed_files"),
+    ...extractDiffFiles(diff)
+  ]);
+  const repoFiles = collectRepoFiles(loaded.repoRoot, loaded.repoRoot).files;
+  const result = analyzeImpact({
+    repoRoot: loaded.repoRoot,
+    target,
+    changedFiles,
+    repoFiles
+  });
+  const text = [
+    "TokenOpt impact analysis",
+    `target: ${result.target}`,
+    `changedFiles: ${result.changedFiles.join(",") || "none_detected"}`,
+    "",
+    "Definitions:",
+    ...(result.definitions.length > 0 ? result.definitions.slice(0, 30).map((item) => `- ${item}`) : ["- none_detected"]),
+    "",
+    "Usages:",
+    ...(result.usages.length > 0 ? result.usages.slice(0, 40).map((item) => `- ${item}`) : ["- none_detected"]),
+    "",
+    "Public contracts:",
+    ...(result.publicContracts.length > 0 ? result.publicContracts.slice(0, 30).map((item) => `- ${item}`) : ["- none_detected"]),
+    "",
+    "Likely tests:",
+    ...(result.likelyTests.length > 0 ? result.likelyTests.slice(0, 30).map((item) => `- ${item}`) : ["- none_detected"]),
+    "",
+    "Missing:",
+    ...(result.missing.length > 0 ? result.missing.map((item) => `- ${item}`) : ["- none"])
+  ].join("\n");
+  return textResult(text, false, { ...result });
+}
+
+function readGitDiff(cwd: string, staged: boolean): string {
+  const args = staged ? ["diff", "--cached"] : ["diff"];
+  const result = spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 32 * 1024 * 1024,
+    shell: process.platform === "win32"
+  });
+  return [result.stdout, result.stderr].filter(Boolean).join("\n");
+}
+
+function readInlineOrRepoFile(
+  args: Record<string, unknown>,
+  loaded: LoadedConfig,
+  inlineKey: "code" | "json"
+): { ok: true; text: string; source: string } | { ok: false; error: string } {
+  const inline = optionalString(args, inlineKey);
+  if (inline !== undefined) {
+    return { ok: true, text: inline, source: "inline" };
+  }
+  const requestedPath = optionalString(args, "path");
+  if (!requestedPath) {
+    return { ok: false, error: `Provide either ${inlineKey} or path.` };
+  }
+  const targetPath = resolveRepoPath(loaded.repoRoot, requestedPath);
+  if (!targetPath.ok) {
+    return { ok: false, error: targetPath.error };
+  }
+  const stat = fs.statSync(targetPath.path);
+  if (!stat.isFile()) {
+    return { ok: false, error: `Not a file: ${requestedPath}` };
+  }
+  return {
+    ok: true,
+    text: fs.readFileSync(targetPath.path, "utf8"),
+    source: path.relative(loaded.repoRoot, targetPath.path).replace(/\\/g, "/")
+  };
 }
 
 function maybeGateAfterAnswerable(loaded: LoadedConfig, attemptedTool: string) {
@@ -1833,6 +2178,8 @@ function compileReviewDiffEvidence(task: string, repoRoot: string, firstEvidence
   const removed = extractDiffLines(task, "-");
   const added = extractDiffLines(task, "+");
   const changedText = [...removed, ...added].join("\n");
+  const javaSummary = prepareJavaDiff(task);
+  const hasJavaDiff = javaSummary.changedFiles.length > 0;
   const taskOrRemoved = `${task}\n${removed.join("\n")}`;
   const taskOrAdded = `${task}\n${added.join("\n")}`;
   const hadoopApplicationTagsRegression =
@@ -1847,6 +2194,9 @@ function compileReviewDiffEvidence(task: string, repoRoot: string, firstEvidence
       coverage: {
         review_diff: files.length > 0 ? "partial" : "missing",
         changed_file: files.length > 0 ? "covered" : "missing",
+        semantic_diff: hasJavaDiff ? "covered" : "missing",
+        impacted_symbols: javaSummary.impactedSymbols.length > 0 ? "partial" : "missing",
+        likely_tests: javaSummary.likelyTests.length > 0 ? "partial" : "missing",
         impacted_flow: "missing",
         test_evidence: "missing"
       },
@@ -1854,13 +2204,17 @@ function compileReviewDiffEvidence(task: string, repoRoot: string, firstEvidence
         {
           id: `E${firstEvidenceIndex}`,
           claim: "Review diff compiler extracted changed files and line-level edits, but no deterministic review rule matched.",
-          files,
+          files: uniqueStrings([...files, ...javaSummary.likelyTests]).slice(0, 32),
           facts: [
             `changed_files=${files.join(",") || "none_detected"}`,
+            `java_categories=${Object.entries(javaSummary.categories).map(([category, count]) => `${category}:${count}`).join(",") || "none_detected"}`,
+            `impacted_symbols=${javaSummary.impactedSymbols.join(",") || "none_detected"}`,
+            `likely_tests=${javaSummary.likelyTests.join(",") || "none_detected"}`,
+            `semantic_hints=${javaSummary.semanticHints.join(" | ") || "none_detected"}`,
             `removed_lines=${removed.slice(0, 6).join(" | ") || "none_detected"}`,
             `added_lines=${added.slice(0, 6).join(" | ") || "none_detected"}`
           ],
-          tokens_est: estimateTokens(changedText)
+          tokens_est: estimateTokens(`${changedText}\n${JSON.stringify(javaSummary)}`)
         }
       ],
       missing: [
@@ -1871,13 +2225,16 @@ function compileReviewDiffEvidence(task: string, repoRoot: string, firstEvidence
         {
           tool: "tokenopt_search",
           reason: "Search for the changed method or exact edited symbol.",
-          args: { pattern: "<changed-symbol>", path: files[0] ? path.dirname(files[0]) : "." },
+          args: {
+            pattern: javaSummary.impactedSymbols[0] ?? "<changed-symbol>",
+            path: files[0] ? path.dirname(files[0]) : "."
+          },
           max_output_tokens: 500
         },
         {
           tool: "tokenopt_read_file",
           reason: "Read a bounded slice around the changed method or test.",
-          args: { path: files[0] ?? "<changed-file>", startLine: 1, maxLines: 160 },
+          args: { path: files[0] ?? javaSummary.likelyTests[0] ?? "<changed-file>", startLine: 1, maxLines: 160 },
           max_output_tokens: 900
         }
       ]

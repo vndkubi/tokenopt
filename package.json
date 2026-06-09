@@ -8,6 +8,7 @@
   },
   "files": [
     "dist",
+    "examples",
     "README.md",
     "SETUP.md",
     "COPILOT_SETUP.md",

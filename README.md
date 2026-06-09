@@ -31,12 +31,15 @@ tokenopt install codex --scope user|repo
 tokenopt setup copilot --scope user|repo|both [--no-agents] [--include-run-command]
 tokenopt install copilot --scope user|repo|both [--no-agents] [--include-run-command]
 tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
+tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
 tokenopt exec -- <command...>
 tokenopt mcp [--mode lite|full]
-tokenopt benchmark daily --repo <path> [--task all] [--mode all] [--out results.json]
+tokenopt benchmark daily --repo <path> [--task all] [--mode all] [--repeat 5] [--randomize] [--out results.json]
 tokenopt benchmark codex-daily --repo <path> [--mode all] [--out results.json]
 tokenopt instructions audit
 tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
+tokenopt instructions graph
+tokenopt instructions install-graph
 tokenopt instructions install --target agents|codex|copilot|copilot-path|copilot-agent
 tokenopt report
 tokenopt doctor
@@ -74,11 +77,16 @@ tokenopt_search
 tokenopt_read_file
 ```
 
-Use `tokenopt mcp --mode full` only when you want command execution and standalone project facts exposed:
+Use `tokenopt mcp --mode full` only when you want command execution, standalone project facts, and task-shaped Java/review/debug helpers exposed:
 
 ```text
 tokenopt_run_command
 tokenopt_project_facts
+tokenopt_prepare_java_diff
+tokenopt_jakarta_annotation_filter
+tokenopt_assemble_spring_context
+tokenopt_business_contract
+tokenopt_impact_analysis
 ```
 
 In this mode, shell commands, searches, and file reads can be routed through TokenOpt-controlled tools that deny broad reads/searches, return bounded file slices, compress command output, and preserve raw logs under the user cache.
@@ -99,9 +107,13 @@ node dist/cli.js instructions install --target agents
 node dist/cli.js instructions install --target copilot
 node dist/cli.js instructions install --target copilot-path
 node dist/cli.js instructions install --target copilot-agent
+node dist/cli.js instructions graph
+node dist/cli.js instructions install-graph
 ```
 
 `agents`/`codex` writes `AGENTS.md`; `copilot` writes `.github/copilot-instructions.md`; `copilot-path` writes `.github/instructions/tokenopt.instructions.md` with `applyTo: "**"`; `copilot-agent` writes `.github/agents/tokenopt-cost-gate.agent.md`. These files tell agents to use TokenOpt as a cost gate, answer from the packet when `answerable=true`, and avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
+
+`instructions graph` plans a shorter root instruction plus path-specific review/runtime instruction files. `instructions install-graph` writes that graph with TokenOpt markers so root guidance stays small while review/debug guidance stays near relevant paths.
 
 For Copilot CLI, use the one-command project setup:
 
@@ -117,15 +129,20 @@ This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.
 Run the repeatable acquisition benchmark:
 
 ```bash
-node dist/cli.js benchmark daily --repo <repo-a> --repo <repo-b> --task all --mode all --show-answers --out benchmark-results/daily-large-repos.json
+node dist/cli.js benchmark daily --repo <repo-a> --repo <repo-b> --task all --mode all --repeat 5 --randomize --show-answers --out benchmark-results/daily-large-repos.json
 ```
 
-The benchmark reports model-visible tool input/output chars, final output chars, estimated input/output/total tokens, quality score, quality checks, tool calls, MCP calls, shell calls, and fallback-after-answerable for:
+The benchmark reports model-visible tool input/output chars, final output chars, estimated input/output/total tokens, quality score, quality checks, tool calls, MCP calls, shell calls, route decision, router regret, estimated avoided tokens, and fallback-after-answerable. `--repeat` and `--randomize` support multi-run randomized order checks. `gold-packet` is an oracle/gold-packet upper-bound diagnostic.
 
 ```text
 baseline
 compiled-packet
+compiled-shadow-gate
 compiled-packet+gate
+router-best
+router-shadow-gate
+router-shadow-gate+compressors
+gold-packet
 oracle-packet
 ```
 
@@ -137,6 +154,12 @@ investigate
 research-business
 implement
 write-unittest
+```
+
+The complete research suite is available at `examples/contextgate-37-prompt-suite.example.json` and can be run with:
+
+```bash
+node dist/cli.js benchmark suite --suite examples/contextgate-37-prompt-suite.example.json --repo <target-repo> --mode baseline,router-best --max-tasks 37 --markdown benchmark-results/complete-suite.md --out benchmark-results/complete-suite.json
 ```
 
 Quality is scored by deterministic rubric checks against the generated benchmark answer. This measures the acquisition layer and answer-readiness directly. It does not replace a full model E2E judge; use it to verify whether TokenOpt reduces evidence replay before running agent-level A/B tests.

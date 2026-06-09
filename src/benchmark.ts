@@ -18,6 +18,7 @@ type BenchmarkMode =
   | "router-best"
   | "router-shadow-gate"
   | "router-shadow-gate+compressors"
+  | "gold-packet"
   | "oracle-packet";
 type BenchmarkTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest";
 
@@ -72,6 +73,7 @@ interface BenchmarkRow {
   estimatedOutputTokens: number;
   estimatedTotalTokens: number;
   fallbackAfterAnswerable: number;
+  run: number;
   estimatedTokensAvoided: number;
   redundantCallRate: number;
   routeDecision: string;
@@ -89,6 +91,7 @@ const ALL_MODES: BenchmarkMode[] = [
   "router-best",
   "router-shadow-gate",
   "router-shadow-gate+compressors",
+  "gold-packet",
   "oracle-packet"
 ];
 const DAILY_TASKS: BenchmarkTask[] = [
@@ -159,16 +162,22 @@ export async function runBenchmarkCommand(args: string[]): Promise<number> {
 
   const options = parseBenchmarkOptions(args.slice(1));
   const rows: BenchmarkRow[] = [];
-  for (const repo of options.repos) {
-    for (const task of options.tasks) {
-      for (const mode of options.modes) {
-        rows.push(await runDailyMode(repo, task, mode));
+  for (let run = 1; run <= options.repeat; run += 1) {
+    const tasks = options.randomize ? shuffle(options.tasks, `tasks-${run}`) : options.tasks;
+    const modes = options.randomize ? shuffle(options.modes, `modes-${run}`) : options.modes;
+    for (const repo of options.repos) {
+      for (const task of tasks) {
+        for (const mode of modes) {
+          rows.push({ ...(await runDailyMode(repo, task, mode)), run });
+        }
       }
     }
   }
 
   const payload = {
     generatedAt: new Date().toISOString(),
+    repeat: options.repeat,
+    randomize: options.randomize,
     tasks: options.tasks.map((task) => ({ id: task.id, label: task.label, prompt: task.prompt })),
     rows: options.showAnswers ? rows : rows.map((row) => ({ ...row, answer: undefined }))
   };
@@ -186,6 +195,8 @@ function parseBenchmarkOptions(args: string[]): {
   tasks: BenchmarkTask[];
   json: boolean;
   showAnswers: boolean;
+  repeat: number;
+  randomize: boolean;
   outPath?: string;
 } {
   const repos: string[] = [];
@@ -193,6 +204,8 @@ function parseBenchmarkOptions(args: string[]): {
   let tasks: BenchmarkTask[] = DAILY_TASKS;
   let json = false;
   let showAnswers = false;
+  let repeat = 1;
+  let randomize = false;
   let outPath: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -232,6 +245,19 @@ function parseBenchmarkOptions(args: string[]): {
       showAnswers = true;
       continue;
     }
+    if (arg === "--repeat") {
+      const value = Number.parseInt(args[index + 1] ?? "", 10);
+      if (!Number.isFinite(value) || value < 1 || value > 50) {
+        throw new Error("--repeat must be an integer from 1 to 50");
+      }
+      repeat = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--randomize") {
+      randomize = true;
+      continue;
+    }
     if (arg === "--out") {
       const output = args[index + 1];
       if (!output) {
@@ -253,6 +279,8 @@ function parseBenchmarkOptions(args: string[]): {
     tasks,
     json,
     showAnswers,
+    repeat,
+    randomize,
     outPath
   };
 }
@@ -266,6 +294,7 @@ function parseBenchmarkMode(value: string): BenchmarkMode {
     value === "router-best" ||
     value === "router-shadow-gate" ||
     value === "router-shadow-gate+compressors" ||
+    value === "gold-packet" ||
     value === "oracle-packet"
   ) {
     return value;
@@ -347,7 +376,7 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
       task_type: mode.startsWith("router-") ? route.taskType : task.taskType,
       cwd: repo,
       budget_tokens: 1800,
-      quality_rubric: mode === "oracle-packet" ? task.oracleRubric : task.qualityRubric
+      quality_rubric: mode === "oracle-packet" || mode === "gold-packet" ? task.oracleRubric : task.qualityRubric
     };
     const compile = await client.callTool({
       name: "tokenopt_compile_evidence",
@@ -442,6 +471,7 @@ function buildRow(input: {
   toolInputChars: number;
   toolOutputChars: number;
   fallbackAfterAnswerable: number;
+  run?: number;
   estimatedTokensAvoided?: number;
   redundantCallRate?: number;
   routeDecision?: string;
@@ -476,6 +506,7 @@ function buildRow(input: {
     estimatedOutputTokens: finalOutputTokens,
     estimatedTotalTokens: estimatedInputTokens + finalOutputTokens,
     fallbackAfterAnswerable: input.fallbackAfterAnswerable,
+    run: input.run ?? 1,
     estimatedTokensAvoided: input.estimatedTokensAvoided ?? 0,
     redundantCallRate: input.redundantCallRate ?? 0,
     routeDecision: input.routeDecision ?? "unknown",
@@ -975,6 +1006,26 @@ function compactList(values: Array<string | undefined>): string {
   return values.filter((value): value is string => Boolean(value && value !== "none_detected")).join(", ");
 }
 
+function shuffle<T>(items: T[], seed: string): T[] {
+  const result = [...items];
+  let state = hashSeed(seed);
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    state = (state * 1664525 + 1013904223) >>> 0;
+    const swapIndex = state % (index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex]!, result[index]!];
+  }
+  return result;
+}
+
+function hashSeed(seed: string): number {
+  let hash = 2166136261;
+  for (const char of seed) {
+    hash ^= char.charCodeAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
 function topCounts(values: string[], limit: number): Array<[string, number]> {
   const counts = new Map<string, number>();
   for (const value of values) {
@@ -994,6 +1045,7 @@ function matchFirst(text: string, pattern: RegExp): string | undefined {
 function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
   const header = [
     "Repo",
+    "Run",
     "Task",
     "Mode",
     "Quality",
@@ -1017,6 +1069,7 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
   ];
   const body = rows.map((row) => [
     path.basename(row.repo),
+    String(row.run),
     row.task,
     row.mode,
     row.qualityScore.toFixed(3),
@@ -1053,6 +1106,6 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
 
 function benchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|compiled-packet|compiled-shadow-gate|compiled-packet+gate|router-best|router-shadow-gate|router-shadow-gate+compressors|oracle-packet|all] [--json] [--show-answers] [--out <path>]
+  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|compiled-packet|compiled-shadow-gate|compiled-packet+gate|router-best|router-shadow-gate|router-shadow-gate+compressors|gold-packet|oracle-packet|all] [--repeat <n>] [--randomize] [--json] [--show-answers] [--out <path>]
 `;
 }
