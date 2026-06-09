@@ -10,6 +10,15 @@ export type PolicyAction = "allow" | "deny" | "rewrite" | "context" | "compress"
 
 export type BroadSearchMode = "deny" | "warn";
 export type ExpensiveTestMode = "allow" | "warn" | "rewrite";
+export type AnswerabilityGateMode = "hard" | "shadow" | "off";
+export type TaskClass =
+  | "broad_flow"
+  | "review_diff"
+  | "debug_runtime"
+  | "refactor_scope"
+  | "exact_symbol"
+  | "small_repo_bypass";
+export type ToolProfile = "explore" | "review" | "debug" | "refactor" | "exact" | "bypass";
 export type EvidenceTaskType =
   | "api_flow"
   | "field_impact"
@@ -23,6 +32,8 @@ export type EvidenceTaskType =
   | "unknown";
 export type EvidenceCoverageStatus = "covered" | "partial" | "missing";
 export type EvidenceNextAction = "answer_now" | "expand_exact" | "targeted_shell" | "ask_user";
+export type RouteAction = "compile" | "bypass" | "exact_route";
+export type OutputPreferredFormat = "unified_diff" | "compact_edit_plan" | "standard_answer";
 
 export interface TokenOptConfig {
   version: 1;
@@ -40,6 +51,10 @@ export interface TokenOptConfig {
       mode: ExpensiveTestMode;
       patterns: string[];
       targetedHint: string;
+    };
+    answerabilityGate: {
+      mode: AnswerabilityGateMode;
+      logShadowDecisions: boolean;
     };
   };
   context: {
@@ -101,11 +116,53 @@ export interface PolicyDecision {
 }
 
 export interface CompressionResult {
-  kind: "vitest" | "jest" | "pytest" | "tsc" | "eslint" | "generic";
+  kind: "vitest" | "jest" | "pytest" | "tsc" | "eslint" | "java-trace" | "build-log" | "generic";
   text: string;
   originalChars: number;
   compressedChars: number;
   estimatedTokensSaved: number;
+}
+
+export interface RouteDecision {
+  taskClass: TaskClass;
+  taskType: EvidenceTaskType;
+  toolProfile: ToolProfile;
+  action: RouteAction;
+  reason: string;
+  confidence: number;
+  promptSignals: string[];
+  negativeControl: boolean;
+}
+
+export interface CoverageCertificate {
+  packet_id?: string;
+  task_class: TaskClass;
+  answerable: boolean;
+  confidence: number;
+  dimensions: Record<string, EvidenceCoverageStatus>;
+  missing: string[];
+  followup_exact_tools_allowed: string[];
+  deny_broad_exploration: boolean;
+}
+
+export interface OutputPolicy {
+  preferred_format: OutputPreferredFormat;
+  avoid_full_file_rewrite: boolean;
+  include_explanation_max_tokens: number;
+  applies_to: string[];
+}
+
+export interface ShadowGateLog {
+  taskId: string;
+  taskClass: TaskClass;
+  toolName: string;
+  wouldDeny: boolean;
+  reason?: string;
+  answerable: boolean;
+  estimatedTokensAvoided: number;
+  timestamp: number;
+  missingDimensions: string[];
+  allowedExactTools: string[];
 }
 
 export interface EvidenceItem {
@@ -136,10 +193,13 @@ export interface EvidencePacket {
   packet_id: string;
   task: string;
   task_type: EvidenceTaskType;
+  route?: RouteDecision;
   repo_root: string;
   answerable: boolean;
   confidence: number;
   coverage: Record<string, EvidenceCoverageStatus>;
+  coverage_certificate?: CoverageCertificate;
+  output_policy?: OutputPolicy;
   evidence: EvidenceItem[];
   missing: string[];
   answer_contract: EvidenceAnswerContract;
@@ -166,7 +226,7 @@ export interface ObservabilityEvent {
   source: TokenOptSource | "cli";
   eventName: string;
   repoRoot: string;
-  action: PolicyAction | "exec" | "audit" | "install" | "doctor" | "evidence";
+  action: PolicyAction | "exec" | "audit" | "install" | "doctor" | "evidence" | "shadow";
   reason?: string;
   toolName?: string;
   command?: string;

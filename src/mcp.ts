@@ -11,14 +11,19 @@ import { executeWrappedShellCommand } from "./exec.js";
 import { compressText } from "./log-compressor.js";
 import { appendEvent, writeArtifact } from "./observability.js";
 import { evaluatePolicy } from "./policy-core.js";
+import { routeTask } from "./router.js";
+import { evaluateShadowGate, logShadowGateDecision } from "./shadow-gate.js";
 import type {
+  CoverageCertificate,
   EvidenceCoverageStatus,
   EvidenceItem,
   EvidenceFollowup,
   EvidencePacket,
   EvidenceTaskType,
   LoadedConfig,
+  OutputPolicy,
   PolicyDecision,
+  RouteDecision,
   TokenOptConfig,
   TokenOptEvent
 } from "./types.js";
@@ -265,12 +270,18 @@ function compileEvidenceTool(args: Record<string, unknown>) {
   const task = sanitizeTaskPrompt(requiredString(args, "task"));
   const cwd = optionalString(args, "cwd") ?? process.cwd();
   const loaded = loadConfig({ cwd });
-  const taskType = normalizeTaskType(optionalString(args, "task_type"), task);
+  const requestedTaskType = normalizeTaskType(optionalString(args, "task_type"), task);
   const budgetTokens = clampInteger(optionalNumber(args, "budget_tokens") ?? 1600, 400, 8000);
   const qualityRubric = optionalStringArray(args, "quality_rubric").slice(0, 12);
   const detail = normalizeEvidenceDetail(optionalString(args, "detail"));
   const includeStructuredPacket = optionalBoolean(args, "include_structured_packet") ?? false;
   const inventory = buildRepoInventory(loaded.repoRoot, loaded.config, loaded.repoRoot);
+  const route = routeTask({
+    task,
+    repoFileCount: inventory.totalFiles,
+    requestedTaskType
+  });
+  const taskType = optionalString(args, "task_type") ? requestedTaskType : route.taskType;
   const facts = extractProjectFacts(loaded.repoRoot);
   const factFiles = factSourceFiles(facts);
   const hasBuildFacts = facts.some((fact) => fact.startsWith("build_tool="));
@@ -380,14 +391,20 @@ function compileEvidenceTool(args: Record<string, unknown>) {
           }
         ];
   const answerContract = buildAnswerContract(taskType, task, qualityRubric, answerable);
+  const packetId = crypto.randomUUID();
+  const coverageCertificate = buildCoverageCertificate(packetId, route, answerable, taskSpecific?.confidence ?? (answerable ? 0.86 : 0.48), coverage, missing, allowedFollowups);
+  const outputPolicy = buildOutputPolicy(route, taskType);
   const packet: EvidencePacket = {
-    packet_id: crypto.randomUUID(),
+    packet_id: packetId,
     task,
     task_type: taskType,
+    route,
     repo_root: loaded.repoRoot,
     answerable,
     confidence: taskSpecific?.confidence ?? (answerable ? 0.86 : 0.48),
     coverage,
+    coverage_certificate: coverageCertificate,
+    output_policy: outputPolicy,
     evidence,
     missing,
     answer_contract: answerContract,
@@ -1014,6 +1031,17 @@ function maybeGateAfterAnswerable(loaded: LoadedConfig, attemptedTool: string) {
   }
 
   const packet = state.packet;
+  const shadow = evaluateShadowGate({
+    state,
+    toolName: attemptedTool,
+    reason: "answerable_packet_would_block_mcp_followup",
+    forceWouldDeny: true
+  });
+  logShadowGateDecision(loaded.config, loaded.repoRoot, shadow);
+  if (loaded.config.policy.answerabilityGate.mode === "off" || loaded.config.policy.answerabilityGate.mode === "shadow") {
+    return undefined;
+  }
+
   const text = [
     "TokenOpt answerability gate: do not replay evidence.",
     `attemptedTool: ${attemptedTool}`,
@@ -1031,8 +1059,55 @@ function maybeGateAfterAnswerable(loaded: LoadedConfig, attemptedTool: string) {
     attemptedTool,
     packetId: packet.packet_id,
     recommendedNextAction: packet.recommended_next_action,
-    expiresAt: packet.expires_at
+    expiresAt: packet.expires_at,
+    shadowGate: shadow
   });
+}
+
+function buildCoverageCertificate(
+  packetId: string,
+  route: RouteDecision,
+  answerable: boolean,
+  confidence: number,
+  coverage: Record<string, EvidenceCoverageStatus>,
+  missing: string[],
+  allowedFollowups: EvidenceFollowup[]
+): CoverageCertificate {
+  return {
+    packet_id: packetId,
+    task_class: route.taskClass,
+    answerable,
+    confidence,
+    dimensions: coverage,
+    missing,
+    followup_exact_tools_allowed: allowedFollowups.map((followup) => followup.tool),
+    deny_broad_exploration: answerable && missing.length === 0
+  };
+}
+
+function buildOutputPolicy(route: RouteDecision, taskType: EvidenceTaskType): OutputPolicy {
+  if (route.taskClass === "review_diff") {
+    return {
+      preferred_format: "compact_edit_plan",
+      avoid_full_file_rewrite: true,
+      include_explanation_max_tokens: 300,
+      applies_to: ["review", "suggested_fix", "patch"]
+    };
+  }
+  if (route.taskClass === "refactor_scope" || taskType === "implement") {
+    return {
+      preferred_format: "unified_diff",
+      avoid_full_file_rewrite: true,
+      include_explanation_max_tokens: 300,
+      applies_to: ["implement", "refactor", "fix bug"]
+    };
+  }
+  return {
+    preferred_format: "standard_answer",
+    avoid_full_file_rewrite: false,
+    include_explanation_max_tokens: 900,
+    applies_to: ["explain", "investigate", "handoff"]
+  };
 }
 
 interface TaskSpecificEvidence {
@@ -1910,6 +1985,9 @@ function inferTaskType(task: string): EvidenceTaskType {
   if (/\b(unit test|unittest|write test|add test|test plan|test strategy)\b/i.test(task)) {
     return "write_unittest";
   }
+  if (/\b(diff|review|pull request|pr|changed files?|code review)\b/i.test(task) || /^diff --git\b/m.test(task)) {
+    return "review_diff";
+  }
   if (/\b(implement|change|add feature|modify|patch|code change)\b/i.test(task)) {
     return "implement";
   }
@@ -1936,9 +2014,6 @@ function inferTaskType(task: string): EvidenceTaskType {
   }
   if (/\b(field|column|property|schema|impact)\b/i.test(task)) {
     return "field_impact";
-  }
-  if (/\b(diff|review|pull request|pr)\b/i.test(task)) {
-    return "review_diff";
   }
   return "unknown";
 }
@@ -2201,8 +2276,11 @@ function buildEvidenceStructuredContent(packet: EvidencePacket, statePath: strin
   const packetSummary = {
     packet_id: packet.packet_id,
     task_type: packet.task_type,
+    route: packet.route,
     answerable: packet.answerable,
     confidence: packet.confidence,
+    coverage_certificate: packet.coverage_certificate,
+    output_policy: packet.output_policy,
     recommended_next_action: packet.recommended_next_action,
     max_additional_calls: packet.max_additional_calls,
     statePath,
@@ -2248,8 +2326,12 @@ function formatCompactEvidencePacket(packet: EvidencePacket, statePath: string |
     "TokenOpt evidence packet compact",
     `packet_id: ${packet.packet_id}`,
     `task_type: ${packet.task_type}`,
+    packet.route ? `route_decision: ${packet.route.taskClass}/${packet.route.toolProfile}/${packet.route.action}` : undefined,
+    packet.route ? `route_reason: ${packet.route.reason}` : undefined,
     `answerable: ${packet.answerable}`,
     `confidence: ${packet.confidence}`,
+    packet.coverage_certificate ? `deny_broad_exploration: ${packet.coverage_certificate.deny_broad_exploration}` : undefined,
+    packet.output_policy ? `output_policy: ${packet.output_policy.preferred_format}` : undefined,
     `recommended_next_action: ${packet.recommended_next_action}`,
     `max_additional_calls: ${packet.max_additional_calls}`,
     statePath ? `state_path: ${statePath}` : undefined,
@@ -2281,8 +2363,12 @@ function formatFullEvidencePacket(packet: EvidencePacket, statePath: string | un
     "TokenOpt compiled evidence packet",
     `packet_id: ${packet.packet_id}`,
     `task_type: ${packet.task_type}`,
+    packet.route ? `route_decision: ${packet.route.taskClass}/${packet.route.toolProfile}/${packet.route.action}` : undefined,
+    packet.route ? `route_reason: ${packet.route.reason}` : undefined,
     `answerable: ${packet.answerable}`,
     `confidence: ${packet.confidence}`,
+    packet.coverage_certificate ? `deny_broad_exploration: ${packet.coverage_certificate.deny_broad_exploration}` : undefined,
+    packet.output_policy ? `output_policy: ${JSON.stringify(packet.output_policy)}` : undefined,
     `recommended_next_action: ${packet.recommended_next_action}`,
     `max_additional_calls: ${packet.max_additional_calls}`,
     statePath ? `state_path: ${statePath}` : undefined,

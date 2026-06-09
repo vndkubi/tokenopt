@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { readActiveEvidenceTaskState, readEvidenceTaskState } from "./evidence-state.js";
 import { compressText, extractTextFromToolResponse, shouldCompressOutput } from "./log-compressor.js";
+import { evaluateShadowGate, logShadowGateDecision } from "./shadow-gate.js";
+import { routeTask } from "./router.js";
 import { commandLooksWrapped, tokenizeCommand } from "./shell.js";
 import type { EvidenceFollowup, PolicyDecision, PolicyRuntime, TokenOptConfig, TokenOptEvent } from "./types.js";
 
@@ -69,13 +71,21 @@ function evaluatePrompt(event: TokenOptEvent, config: TokenOptConfig): PolicyDec
     };
   }
 
+  const route = routeTask({ task: prompt });
+  const outputGuidance =
+    route.taskClass === "review_diff" || route.taskClass === "refactor_scope"
+      ? " For code changes, prefer unified diffs or compact edit plans; avoid full-file rewrites unless creating a new file."
+      : "";
   const context = config.codegraph.enabled
     ? `${config.context.userPromptGuidance} CodeGraph is configured as an optional repository context provider; prefer bounded CodeGraph packs before broad raw file reads.`
     : config.context.userPromptGuidance;
 
   return {
     action: "context",
-    additionalContext: context
+    additionalContext: `${context}${outputGuidance}`,
+    metadata: {
+      routeDecision: route
+    }
   };
 }
 
@@ -91,21 +101,71 @@ function evaluatePreToolUse(event: TokenOptEvent, config: TokenOptConfig, runtim
     if (detectShellSearch(command)) {
       const activeEvidence = readActiveEvidenceTaskState(config, runtime.repoRoot);
       if (activeEvidence) {
+        const shadow = evaluateShadowGate({
+          state: activeEvidence,
+          toolName,
+          toolInput: event.toolInput,
+          reason: "answerable_packet_would_block_shell_search",
+          forceWouldDeny: true
+        });
+        logShadowGateDecision(config, runtime.repoRoot, shadow);
+        if (config.policy.answerabilityGate.mode === "off") {
+          return { action: "allow", metadata: { shadowGate: shadow } };
+        }
+        if (config.policy.answerabilityGate.mode === "shadow") {
+          return {
+            action: "context",
+            reason:
+              `TokenOpt shadow gate would block shell search after answerable packet ${activeEvidence.packet.packet_id} ` +
+              `(${activeEvidence.packet.task_type}).`,
+            additionalContext:
+              "TokenOpt shadow gate: this search looks redundant because the current evidence packet is answerable. " +
+              "Answer from the packet unless the user changed the task.",
+            estimatedTokensSaved: shadow.estimatedTokensAvoided,
+            metadata: { shadowGate: shadow }
+          };
+        }
         return {
           action: "deny",
           reason:
             `TokenOpt answerability gate blocked shell search after answerable packet ${activeEvidence.packet.packet_id} ` +
-            `(${activeEvidence.packet.task_type}). Answer from the packet, or call tokenopt_compile_evidence for a changed task.`
+            `(${activeEvidence.packet.task_type}). Answer from the packet, or call tokenopt_compile_evidence for a changed task.`,
+          estimatedTokensSaved: shadow.estimatedTokensAvoided,
+          metadata: { shadowGate: shadow }
         };
       }
 
       const recentEvidence = readEvidenceTaskState(config, runtime.repoRoot);
       if (recentEvidence && Date.parse(recentEvidence.packet.expires_at) > Date.now() && hasTokenOptFollowups(recentEvidence.packet.allowed_followups)) {
+        const shadow = evaluateShadowGate({
+          state: recentEvidence,
+          toolName,
+          toolInput: event.toolInput,
+          reason: "packet_followups_would_block_raw_shell_search",
+          forceWouldDeny: true
+        });
+        logShadowGateDecision(config, runtime.repoRoot, shadow);
+        if (config.policy.answerabilityGate.mode === "off") {
+          return { action: "allow", metadata: { shadowGate: shadow } };
+        }
+        if (config.policy.answerabilityGate.mode === "shadow") {
+          return {
+            action: "context",
+            reason:
+              `TokenOpt shadow gate would route shell search through allowed followups for packet ${recentEvidence.packet.packet_id} ` +
+              `(${recentEvidence.packet.task_type}).`,
+            additionalContext: "Use the packet's allowed_followups with tokenopt_search/tokenopt_read_file when possible.",
+            estimatedTokensSaved: shadow.estimatedTokensAvoided,
+            metadata: { shadowGate: shadow }
+          };
+        }
         return {
           action: "deny",
           reason:
             `TokenOpt blocked shell search after packet ${recentEvidence.packet.packet_id} (${recentEvidence.packet.task_type}). ` +
-            "Use the packet's allowed_followups with tokenopt_search/tokenopt_read_file instead."
+            "Use the packet's allowed_followups with tokenopt_search/tokenopt_read_file instead.",
+          estimatedTokensSaved: shadow.estimatedTokensAvoided,
+          metadata: { shadowGate: shadow }
         };
       }
     }

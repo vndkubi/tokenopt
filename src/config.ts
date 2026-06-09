@@ -29,6 +29,10 @@ export const DEFAULT_CONFIG: TokenOptConfig = {
         "^mvn(?:\\.cmd)?(?:\\s+[^\\s]+)*\\s+(?:test|verify)(?:\\s|$)"
       ],
       targetedHint: "Run a targeted test first, or let TokenOpt wrap the command to compact noisy output."
+    },
+    answerabilityGate: {
+      mode: "hard",
+      logShadowDecisions: true
     }
   },
   context: {
@@ -120,6 +124,12 @@ function applyEnvOverrides(config: TokenOptConfig, env: NodeJS.ProcessEnv): Toke
   }
   if (env.TOKENOPT_ARTIFACT_DIR) {
     next.paths.artifactDir = env.TOKENOPT_ARTIFACT_DIR;
+  }
+  if (env.TOKENOPT_ANSWERABILITY_GATE) {
+    const mode = env.TOKENOPT_ANSWERABILITY_GATE.toLowerCase();
+    if (mode === "hard" || mode === "shadow" || mode === "off") {
+      next.policy.answerabilityGate.mode = mode;
+    }
   }
   return next;
 }

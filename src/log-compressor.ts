@@ -1,4 +1,6 @@
 import type { CompressionResult } from "./types.js";
+import { compressBuildLog, looksLikeBuildLog } from "./compressors/build-log-compressor.js";
+import { compressJavaTrace, looksLikeJavaTrace } from "./compressors/java-trace-compressor.js";
 
 const DEFAULT_LIMIT = 12_000;
 
@@ -35,6 +37,12 @@ export function extractTextFromToolResponse(response: unknown): string {
 
 export function compressText(text: string, limitChars = DEFAULT_LIMIT): CompressionResult {
   const normalized = text.replace(/\r\n/g, "\n");
+  if (looksLikeJavaTrace(normalized)) {
+    return compressJavaTrace(normalized, limitChars);
+  }
+  if (looksLikeBuildLog(normalized)) {
+    return compressBuildLog(normalized, limitChars);
+  }
   const kind = detectKind(normalized);
   const lines = normalized.split("\n");
   const summaryLines = selectSummaryLines(lines, kind);
@@ -55,6 +63,9 @@ export function compressText(text: string, limitChars = DEFAULT_LIMIT): Compress
 }
 
 export function shouldCompressOutput(text: string, maxChars: number): boolean {
+  if (looksLikeJavaTrace(text) || looksLikeBuildLog(text)) {
+    return true;
+  }
   if (text.length > maxChars) {
     return true;
   }

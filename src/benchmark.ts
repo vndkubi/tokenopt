@@ -5,9 +5,20 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { loadConfig } from "./config.js";
+import { readRepoEvents } from "./observability.js";
+import { routeTask } from "./router.js";
 import type { EvidenceTaskType } from "./types.js";
 
-type BenchmarkMode = "baseline" | "compiled-packet" | "compiled-packet+gate" | "oracle-packet";
+type BenchmarkMode =
+  | "baseline"
+  | "compiled-packet"
+  | "compiled-shadow-gate"
+  | "compiled-packet+gate"
+  | "router-best"
+  | "router-shadow-gate"
+  | "router-shadow-gate+compressors"
+  | "oracle-packet";
 type BenchmarkTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest";
 
 interface BenchmarkTask {
@@ -61,11 +72,25 @@ interface BenchmarkRow {
   estimatedOutputTokens: number;
   estimatedTotalTokens: number;
   fallbackAfterAnswerable: number;
+  estimatedTokensAvoided: number;
+  redundantCallRate: number;
+  routeDecision: string;
+  routeReason: string;
+  routerRegret: string;
   answer: string;
   notes: string;
 }
 
-const ALL_MODES: BenchmarkMode[] = ["baseline", "compiled-packet", "compiled-packet+gate", "oracle-packet"];
+const ALL_MODES: BenchmarkMode[] = [
+  "baseline",
+  "compiled-packet",
+  "compiled-shadow-gate",
+  "compiled-packet+gate",
+  "router-best",
+  "router-shadow-gate",
+  "router-shadow-gate+compressors",
+  "oracle-packet"
+];
 const DAILY_TASKS: BenchmarkTask[] = [
   {
     id: "build-handoff",
@@ -233,7 +258,16 @@ function parseBenchmarkOptions(args: string[]): {
 }
 
 function parseBenchmarkMode(value: string): BenchmarkMode {
-  if (value === "baseline" || value === "compiled-packet" || value === "compiled-packet+gate" || value === "oracle-packet") {
+  if (
+    value === "baseline" ||
+    value === "compiled-packet" ||
+    value === "compiled-shadow-gate" ||
+    value === "compiled-packet+gate" ||
+    value === "router-best" ||
+    value === "router-shadow-gate" ||
+    value === "router-shadow-gate+compressors" ||
+    value === "oracle-packet"
+  ) {
     return value;
   }
   throw new Error(`Unknown benchmark mode: ${value}`);
@@ -254,7 +288,7 @@ async function runDailyMode(repo: string, task: BenchmarkTask, mode: BenchmarkMo
   return runMcpDaily(repo, task, mode);
 }
 
-function runBaselineDaily(repo: string, task: BenchmarkTask): BenchmarkRow {
+function runBaselineDaily(repo: string, task: BenchmarkTask, mode: BenchmarkMode = "baseline"): BenchmarkRow {
   const rgInput = "rg --files";
   const rg = spawnSync("rg", ["--files"], {
     cwd: repo,
@@ -269,11 +303,16 @@ function runBaselineDaily(repo: string, task: BenchmarkTask): BenchmarkRow {
   const signals = signalsFromBaseline(repo, rawInventory, files);
   const answer = renderAnswer(task, signals, "baseline");
   const quality = scoreAnswer(task, answer, signals);
+  const route = routeTask({
+    task: task.prompt,
+    repoFileCount: rawInventory.split(/\r?\n/).filter(Boolean).length,
+    requestedTaskType: task.taskType
+  });
 
   return buildRow({
     repo,
     task,
-    mode: "baseline",
+    mode,
     answerable: hasMinimumSignals(task, signals),
     toolCalls: 1 + files.length,
     mcpCalls: 0,
@@ -281,19 +320,31 @@ function runBaselineDaily(repo: string, task: BenchmarkTask): BenchmarkRow {
     toolInputChars,
     toolOutputChars: toolOutput.length,
     fallbackAfterAnswerable: 0,
+    estimatedTokensAvoided: 0,
+    redundantCallRate: 0,
+    routeDecision: route.taskClass,
+    routeReason: route.reason,
+    routerRegret: "none",
     answer,
     quality,
-    notes: `raw_inventory_chars=${rawInventory.length}; files_read=${files.length}`
+    notes: `${mode !== "baseline" ? "router_bypass=true; " : ""}raw_inventory_chars=${rawInventory.length}; files_read=${files.length}`
   });
 }
 
 async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<BenchmarkMode, "baseline">): Promise<BenchmarkRow> {
   const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-benchmark-"));
-  const { client, close } = await createMcpClient(repo, artifactDir);
+  const repoFileCount = countRepoFiles(repo);
+  const route = routeTask({ task: task.prompt, repoFileCount, requestedTaskType: task.taskType });
+  if (mode === "router-best" && route.action === "bypass") {
+    return runBaselineDaily(repo, task, mode);
+  }
+
+  const shadowMode = mode === "compiled-shadow-gate" || mode === "router-shadow-gate" || mode === "router-shadow-gate+compressors";
+  const { client, close } = await createMcpClient(repo, artifactDir, shadowMode ? { TOKENOPT_ANSWERABILITY_GATE: "shadow" } : undefined);
   try {
     const args = {
       task: task.prompt,
-      task_type: task.taskType,
+      task_type: mode.startsWith("router-") ? route.taskType : task.taskType,
       cwd: repo,
       budget_tokens: 1800,
       quality_rubric: mode === "oracle-packet" ? task.oracleRubric : task.qualityRubric
@@ -303,9 +354,15 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
       arguments: args
     });
     const compileText = toolText(compile);
-    const structured = (compile as { structuredContent?: { packet?: { answerable?: boolean }; packetSummary?: { answerable?: boolean } } }).structuredContent;
+    const structured = (compile as {
+      structuredContent?: {
+        packet?: { answerable?: boolean; route?: { taskClass?: string; reason?: string; action?: string } };
+        packetSummary?: { answerable?: boolean; route?: { taskClass?: string; reason?: string; action?: string } };
+      };
+    }).structuredContent;
     const compilePacket = structured?.packetSummary ?? structured?.packet;
     const answerable = compilePacket?.answerable ?? /answerable:\s*true/.test(compileText);
+    const packetRoute = compilePacket?.route;
     const signals = signalsFromCompiledPacket(compileText);
     const answer = renderAnswer(task, signals, mode);
     const quality = scoreAnswer(task, answer, signals);
@@ -315,9 +372,16 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
     let toolInputChars = JSON.stringify(args).length;
     let toolOutputChars = compileText.length;
     let fallbackAfterAnswerable = 0;
+    let estimatedTokensAvoided = 0;
+    let redundantCallRate = 0;
     let notes = `artifact_dir=${artifactDir}`;
 
-    if (mode === "compiled-packet+gate") {
+    if (
+      mode === "compiled-packet+gate" ||
+      mode === "compiled-shadow-gate" ||
+      mode === "router-shadow-gate" ||
+      mode === "router-shadow-gate+compressors"
+    ) {
       const redundantArgs = { pattern: task.redundantPattern, cwd: repo };
       const gated = await client.callTool({
         name: "tokenopt_search",
@@ -328,9 +392,19 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
       mcpCalls += 1;
       toolInputChars += JSON.stringify(redundantArgs).length;
       toolOutputChars += gatedText.length;
-      fallbackAfterAnswerable = answerable && /TokenOpt answerability gate/.test(gatedText) ? 0 : 1;
+      fallbackAfterAnswerable = answerable && !/TokenOpt answerability gate/.test(gatedText) ? 1 : 0;
+      const shadow = readShadowGateSummary(repo, artifactDir);
+      estimatedTokensAvoided = shadow.estimatedTokensAvoided;
+      redundantCallRate = toolCalls > 0 ? Number((shadow.redundantCalls / toolCalls).toFixed(3)) : 0;
       notes = `${notes}; gate_output_chars=${gatedText.length}`;
     }
+    const routeDecision = packetRoute?.taskClass ?? route.taskClass;
+    const routeReason = packetRoute?.reason ?? route.reason;
+    const routerRegret = route.action === "bypass" && mode !== "router-best"
+      ? "mcp_used_despite_bypass"
+      : route.action === "exact_route" && answerable
+        ? "compiled_exact_route"
+        : "none";
 
     return buildRow({
       repo,
@@ -343,6 +417,11 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
       toolInputChars,
       toolOutputChars,
       fallbackAfterAnswerable,
+      estimatedTokensAvoided,
+      redundantCallRate,
+      routeDecision,
+      routeReason,
+      routerRegret,
       answer,
       quality,
       notes
@@ -363,6 +442,11 @@ function buildRow(input: {
   toolInputChars: number;
   toolOutputChars: number;
   fallbackAfterAnswerable: number;
+  estimatedTokensAvoided?: number;
+  redundantCallRate?: number;
+  routeDecision?: string;
+  routeReason?: string;
+  routerRegret?: string;
   answer: string;
   quality: QualityResult;
   notes: string;
@@ -392,12 +476,21 @@ function buildRow(input: {
     estimatedOutputTokens: finalOutputTokens,
     estimatedTotalTokens: estimatedInputTokens + finalOutputTokens,
     fallbackAfterAnswerable: input.fallbackAfterAnswerable,
+    estimatedTokensAvoided: input.estimatedTokensAvoided ?? 0,
+    redundantCallRate: input.redundantCallRate ?? 0,
+    routeDecision: input.routeDecision ?? "unknown",
+    routeReason: input.routeReason ?? "",
+    routerRegret: input.routerRegret ?? "none",
     answer: input.answer,
     notes: `${input.notes}; failed_checks=${input.quality.checks.filter((check) => !check.passed).map((check) => check.name).join(",") || "none"}`
   };
 }
 
-async function createMcpClient(repo: string, artifactDir: string): Promise<{ client: Client; close: () => Promise<void> }> {
+async function createMcpClient(
+  repo: string,
+  artifactDir: string,
+  envOverrides: NodeJS.ProcessEnv = {}
+): Promise<{ client: Client; close: () => Promise<void> }> {
   const cliPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -405,6 +498,7 @@ async function createMcpClient(repo: string, artifactDir: string): Promise<{ cli
     cwd: repo,
     env: {
       ...process.env,
+      ...envOverrides,
       TOKENOPT_ARTIFACT_DIR: artifactDir
     }
   });
@@ -416,6 +510,61 @@ async function createMcpClient(repo: string, artifactDir: string): Promise<{ cli
       await client.close();
     }
   };
+}
+
+function countRepoFiles(repo: string): number {
+  const rg = spawnSync("rg", ["--files"], {
+    cwd: repo,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+    shell: process.platform === "win32"
+  });
+  if (rg.status === 0 && rg.stdout) {
+    return rg.stdout.split(/\r?\n/).filter(Boolean).length;
+  }
+  return readAllFiles(repo).length;
+}
+
+function readAllFiles(root: string): string[] {
+  const result: string[] = [];
+  const stack = [root];
+  while (stack.length > 0 && result.length < 20_000) {
+    const current = stack.pop()!;
+    for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
+      if (entry.name === ".git" || entry.name === "node_modules" || entry.name === "dist") {
+        continue;
+      }
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(absolute);
+      } else if (entry.isFile()) {
+        result.push(path.relative(root, absolute));
+      }
+    }
+  }
+  return result;
+}
+
+function readShadowGateSummary(repo: string, artifactDir: string): { estimatedTokensAvoided: number; redundantCalls: number } {
+  const loaded = loadConfig({
+    cwd: repo,
+    env: {
+      ...process.env,
+      TOKENOPT_ARTIFACT_DIR: artifactDir
+    }
+  });
+  const events = readRepoEvents(loaded.config, loaded.repoRoot);
+  let estimatedTokensAvoided = 0;
+  let redundantCalls = 0;
+  for (const event of events) {
+    const shadow = (event.metadata as { shadowGate?: { wouldDeny?: boolean; estimatedTokensAvoided?: number } } | undefined)?.shadowGate;
+    if (!shadow?.wouldDeny) {
+      continue;
+    }
+    estimatedTokensAvoided += shadow.estimatedTokensAvoided ?? 0;
+    redundantCalls += 1;
+  }
+  return { estimatedTokensAvoided, redundantCalls };
 }
 
 function readBaselineFiles(repo: string): Array<{ relativePath: string; text: string }> {
@@ -464,7 +613,10 @@ function signalsFromBaseline(
 }
 
 function signalsFromCompiledPacket(text: string): RepoSignals {
-  const facts = [...text.matchAll(/^\s*fact:\s*(.+)$/gm)].map((match) => match[1].trim());
+  const facts = [
+    ...[...text.matchAll(/^\s*fact:\s*(.+)$/gm)].map((match) => match[1].trim()),
+    ...[...text.matchAll(/^\s*facts=(.+)$/gm)].flatMap((match) => match[1].split("|").map((item) => item.trim()))
+  ].filter(Boolean);
   const topDirs = splitFactList(firstFactValue(facts, "top_dirs")).map((item) => item.replace(/:\d+$/, ""));
   const sourceDirs = splitFactList(firstFactValue(facts, "source_dirs")).map((item) => item.replace(/:\d+$/, ""));
   const testDirs = splitFactList(firstFactValue(facts, "test_dirs")).map((item) => item.replace(/:\d+$/, ""));
@@ -857,7 +1009,11 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
     "Input tok",
     "Output tok",
     "Total tok",
-    "Fallback"
+    "Fallback",
+    "Avoided tok",
+    "Redundant",
+    "Route",
+    "Regret"
   ];
   const body = rows.map((row) => [
     path.basename(row.repo),
@@ -876,7 +1032,11 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
     String(row.estimatedInputTokens),
     String(row.estimatedOutputTokens),
     String(row.estimatedTotalTokens),
-    String(row.fallbackAfterAnswerable)
+    String(row.fallbackAfterAnswerable),
+    String(row.estimatedTokensAvoided),
+    row.redundantCallRate.toFixed(3),
+    row.routeDecision,
+    row.routerRegret
   ]);
   const table = [header, ...body];
   const widths = header.map((_, column) => Math.max(...table.map((row) => row[column].length)));
@@ -893,6 +1053,6 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
 
 function benchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|compiled-packet|compiled-packet+gate|oracle-packet|all] [--json] [--show-answers] [--out <path>]
+  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|compiled-packet|compiled-shadow-gate|compiled-packet+gate|router-best|router-shadow-gate|router-shadow-gate+compressors|oracle-packet|all] [--json] [--show-answers] [--out <path>]
 `;
 }
