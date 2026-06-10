@@ -1,0 +1,971 @@
+{
+    "name":  "ContextGate 37 Prompt Complete Suite",
+    "version":  "2026-06-10",
+    "purpose":  "Canonical benchmark suite from contextgate-complete-research-synthesis.md covering universal, SpecKit, and Java task classes.",
+    "tasks":  [
+                  {
+                      "id":  "U1-investigate-flow",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Investigate the primary user/business flow in this repository. Return JSON with files, symbols, terms, risks, and evidence.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "flow",
+                                                             "evidence"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies entrypoints",
+                                            "cites evidence",
+                                            "states unknowns"
+                                        ],
+                      "gateAssertions":  [
+                                             "router selects broad_flow",
+                                             "no broad fallback after answerable"
+                                         ]
+                  },
+                  {
+                      "id":  "U2-pbi-plan",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Create an implementation plan for a small PBI/requirement while preserving compatibility. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "implementation",
+                                                             "tests"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "names impacted areas",
+                                            "includes tests",
+                                            "states rollout risks"
+                                        ],
+                      "gateAssertions":  [
+                                             "uses bounded evidence"
+                                         ]
+                  },
+                  {
+                      "id":  "U3-write-unittest-class",
+                      "project":  "doughnut",
+                      "class":  "exact_symbol",
+                      "prompt":  "Write a unit-test plan for the likely owning class/module of a behavior. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "test",
+                                                             "assertion"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds test location",
+                                            "gives targeted command",
+                                            "maps assertions"
+                                        ],
+                      "gateAssertions":  [
+                                             "avoids repo-wide search"
+                                         ]
+                  },
+                  {
+                      "id":  "U4-requirement-analysis",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Analyze a requirement and produce WHAT, WHY, HOW, acceptance criteria, impacted areas, tests, and unknowns. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "requirement",
+                                                             "acceptance"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "covers what why how",
+                                            "has acceptance criteria",
+                                            "has tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "coverage certificate present"
+                                         ]
+                  },
+                  {
+                      "id":  "U5-repo-benchmark-analysis",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Analyze this repository as a benchmark target: build facts, repo shape, likely task classes, and cost risks. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+                                                             "README.md"
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "build",
+                                                             "benchmark"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies build facts",
+                                            "summarizes repo shape",
+                                            "states cost risks"
+                                        ],
+                      "gateAssertions":  [
+                                             "compile evidence replaces raw file listing"
+                                         ]
+                  },
+                  {
+                      "id":  "U6-investigate-pbi",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Investigate a PBI across the repo and identify likely files, symbols, tests, and open questions. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "PBI",
+                                                             "files",
+                                                             "tests"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "names candidate files",
+                                            "names tests",
+                                            "states gaps"
+                                        ],
+                      "gateAssertions":  [
+                                             "allowed followups are exact"
+                                         ]
+                  },
+                  {
+                      "id":  "U7-e2e-trace-flow",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Trace an end-to-end flow and produce a Mermaid-ready sequence with evidence. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "sequence",
+                                                             "flow"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has ordered steps",
+                                            "cites files",
+                                            "marks inferred edges"
+                                        ],
+                      "gateAssertions":  [
+                                             "bounded flow evidence"
+                                         ]
+                  },
+                  {
+                      "id":  "U8-bug-trace",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Debug a failing behavior from logs or errors and identify root cause candidates, evidence, and targeted verification. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "root cause",
+                                                             "verification"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "compresses failure evidence",
+                                            "has root-cause hypothesis",
+                                            "has targeted command"
+                                        ],
+                      "gateAssertions":  [
+                                             "debug route allows exact fallback only"
+                                         ]
+                  },
+                  {
+                      "id":  "U9-performance-analysis",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Analyze likely performance hotspots and propose measurement-first optimizations. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "performance",
+                                                             "hotspot"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies hotspots",
+                                            "proposes measurements",
+                                            "avoids speculative fixes"
+                                        ],
+                      "gateAssertions":  [
+                                             "no broad fallback after answerable"
+                                         ]
+                  },
+                  {
+                      "id":  "U10-security-audit",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Perform a security-focused review of changed behavior or risky surfaces. Return JSON findings.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "security",
+                                                             "finding"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "prioritizes exploitable findings",
+                                            "cites evidence",
+                                            "avoids style nits"
+                                        ],
+                      "gateAssertions":  [
+                                             "review compiler used when diff exists"
+                                         ]
+                  },
+                  {
+                      "id":  "U11-dependency-analysis",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Analyze dependency/build graph risks and targeted verification commands. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "dependency",
+                                                             "build"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies build tool",
+                                            "names dependency risks",
+                                            "has targeted checks"
+                                        ],
+                      "gateAssertions":  [
+                                             "lockfile reads avoided unless required"
+                                         ]
+                  },
+                  {
+                      "id":  "U12-onboarding-guide",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Create a concise onboarding guide grounded in repo evidence. Return JSON sections and citations.",
+                      "expectedEvidence":  {
+                                               "files":  [
+                                                             "README.md"
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "onboarding",
+                                                             "build"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has setup",
+                                            "has repo map",
+                                            "has verification path"
+                                        ],
+                      "gateAssertions":  [
+                                             "build handoff packet answerable when facts exist"
+                                         ]
+                  },
+                  {
+                      "id":  "S1-autorun",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Plan a SpecKit /autorun workflow with bounded phases, evidence reuse, and verification checkpoints. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "autorun",
+                                                             "checkpoint"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "splits phases",
+                                            "reuses evidence",
+                                            "has verification"
+                                        ],
+                      "gateAssertions":  [
+                                             "episodic cold-start risk called out"
+                                         ]
+                  },
+                  {
+                      "id":  "S2-plan-implementation",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Plan implementation for a SpecKit feature with impact analysis and targeted tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "plan",
+                                                             "impact"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has impacted files",
+                                            "has tests",
+                                            "has risks"
+                                        ],
+                      "gateAssertions":  [
+                                             "impact analysis used"
+                                         ]
+                  },
+                  {
+                      "id":  "S3-review-code",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review a SpecKit code diff with business contract evidence and compact findings. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "review",
+                                                             "contract"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "uses diff evidence",
+                                            "links contracts",
+                                            "findings are compact"
+                                        ],
+                      "gateAssertions":  [
+                                             "diff-first review"
+                                         ]
+                  },
+                  {
+                      "id":  "S4-debug-error",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Debug a SpecKit error or stack trace and keep only causal evidence plus exact verification. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "debug",
+                                                             "error"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "keeps causal chain",
+                                            "has target verification",
+                                            "avoids log spam"
+                                        ],
+                      "gateAssertions":  [
+                                             "compressor v2 active"
+                                         ]
+                  },
+                  {
+                      "id":  "S5-refactor-code",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Scope a SpecKit refactor and return impacted definitions, usages, contracts, and tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "refactor",
+                                                             "usage"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds usages",
+                                            "finds tests",
+                                            "mentions contracts"
+                                        ],
+                      "gateAssertions":  [
+                                             "impact analysis used"
+                                         ]
+                  },
+                  {
+                      "id":  "S6-implement-feature",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Plan a SpecKit feature implementation with diff-first output policy and targeted validation. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "feature",
+                                                             "validation"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has plan",
+                                            "has validation",
+                                            "prefers diff output"
+                                        ],
+                      "gateAssertions":  [
+                                             "output policy unified_diff"
+                                         ]
+                  },
+                  {
+                      "id":  "S7-specify-feature",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Specify a feature from repo/domain evidence and produce acceptance criteria. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "specify",
+                                                             "acceptance"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has domain evidence",
+                                            "has acceptance criteria",
+                                            "has unknowns"
+                                        ],
+                      "gateAssertions":  [
+                                             "evidence packet used"
+                                         ]
+                  },
+                  {
+                      "id":  "S8-generate-tests",
+                      "project":  "doughnut",
+                      "class":  "exact_symbol",
+                      "prompt":  "Generate a test plan for a specific SpecKit behavior with likely test files and assertions. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "tests",
+                                                             "assertions"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "names test files",
+                                            "names assertions",
+                                            "has targeted command"
+                                        ],
+                      "gateAssertions":  [
+                                             "exact route when target specified"
+                                         ]
+                  },
+                  {
+                      "id":  "S9-promote-review-memory",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Identify what should be promoted into review memory after a completed task. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "memory",
+                                                             "review"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "promotes reusable facts",
+                                            "avoids stale details",
+                                            "has expiry"
+                                        ],
+                      "gateAssertions":  [
+                                             "cross-session cache candidate"
+                                         ]
+                  },
+                  {
+                      "id":  "S10-inspect-context",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Inspect context budget risks and recommend compaction checkpoints. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "context",
+                                                             "compaction"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies budget drivers",
+                                            "has checkpoints",
+                                            "has risks"
+                                        ],
+                      "gateAssertions":  [
+                                             "compaction checkpoint candidate"
+                                         ]
+                  },
+                  {
+                      "id":  "J1-debug-spring-boot-startup",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Debug a Spring Boot startup failure from stack trace/build evidence. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Spring",
+                                                             "startup"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "compresses stack trace",
+                                            "keeps caused by",
+                                            "has config suspects"
+                                        ],
+                      "gateAssertions":  [
+                                             "java trace compressor"
+                                         ]
+                  },
+                  {
+                      "id":  "J2-review-jakarta-ee-pr",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review a Jakarta EE Java PR diff larger than 3000 lines using semantic diff and contract evidence. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Jakarta",
+                                                             "review"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "classifies Java hunks",
+                                            "links contracts",
+                                            "collapses low-signal edits"
+                                        ],
+                      "gateAssertions":  [
+                                             "java diff processor"
+                                         ]
+                  },
+                  {
+                      "id":  "J3-refactor-jndi-resource",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Scope a JNDI resource refactor with impacted usages, config, and tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "JNDI",
+                                                             "refactor"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds usages",
+                                            "finds config",
+                                            "finds tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "impact analysis"
+                                         ]
+                  },
+                  {
+                      "id":  "J4-explain-spring-security-flow",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Explain Spring Security request flow with security chain evidence. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "SecurityFilterChain",
+                                                             "security"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies filters",
+                                            "maps auth flow",
+                                            "states gaps"
+                                        ],
+                      "gateAssertions":  [
+                                             "spring context assembler"
+                                         ]
+                  },
+                  {
+                      "id":  "J5-add-feature-flag",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Plan adding a Togglz/feature flag in a Java service with tests and rollout safety. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "feature flag",
+                                                             "Togglz"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "has rollout plan",
+                                            "has tests",
+                                            "has fallback"
+                                        ],
+                      "gateAssertions":  [
+                                             "diff-first output"
+                                         ]
+                  },
+                  {
+                      "id":  "J6-fix-hibernate-n-plus-one",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Diagnose and plan a fix for a Hibernate N+1 query issue. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Hibernate",
+                                                             "N+1"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies data path",
+                                            "has measurement",
+                                            "has targeted tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "debug/runtime route"
+                                         ]
+                  },
+                  {
+                      "id":  "J7-migrate-javax-jakarta",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Scope javax to jakarta migration impact, contracts, and tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "javax",
+                                                             "jakarta"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds imports",
+                                            "finds config",
+                                            "has test plan"
+                                        ],
+                      "gateAssertions":  [
+                                             "impact analysis"
+                                         ]
+                  },
+                  {
+                      "id":  "J8-add-actuator-health-check",
+                      "project":  "doughnut",
+                      "class":  "refactor_scope",
+                      "prompt":  "Plan adding an Actuator health check with Spring context and tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Actuator",
+                                                             "health"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds health config",
+                                            "has tests",
+                                            "states operational risk"
+                                        ],
+                      "gateAssertions":  [
+                                             "spring context assembler"
+                                         ]
+                  },
+                  {
+                      "id":  "J9-jpa-entity-validation",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review JPA entity validation changes and collapse Lombok/Jakarta annotation noise. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "JPA",
+                                                             "validation"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "preserves JPA annotations",
+                                            "collapses Lombok",
+                                            "links validation tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "jakarta annotation filter"
+                                         ]
+                  },
+                  {
+                      "id":  "J10-maven-dependency-conflict",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Debug a Maven dependency conflict from build logs and propose targeted resolution. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+                                                             "pom.xml"
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Maven",
+                                                             "dependency"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "compresses build log",
+                                            "identifies conflict",
+                                            "has targeted command"
+                                        ],
+                      "gateAssertions":  [
+                                             "build log compressor"
+                                         ]
+                  },
+                  {
+                      "id":  "J11-spring-batch-job-failure",
+                      "project":  "doughnut",
+                      "class":  "debug_runtime",
+                      "prompt":  "Debug a Spring Batch job failure from logs/stack trace and identify failing step and restart safety. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Spring Batch",
+                                                             "job"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "finds failing step",
+                                            "keeps caused by",
+                                            "has restart risk"
+                                        ],
+                      "gateAssertions":  [
+                                             "java trace compressor"
+                                         ]
+                  },
+                  {
+                      "id":  "J12-microservice-api-contract",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review a microservice API contract change for compatibility and tests. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "API",
+                                                             "contract"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "links API contract",
+                                            "checks compatibility",
+                                            "has tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "business contract linker"
+                                         ]
+                  },
+                  {
+                      "id":  "J13-jms-listener-review",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review JMS listener changes for destination, ack/retry behavior, and message compatibility. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "JMS",
+                                                             "listener"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "detects messaging contract",
+                                            "checks retry/ack",
+                                            "has regression tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "java diff processor jms-config"
+                                         ]
+                  },
+                  {
+                      "id":  "J14-spring-data-jpa-optimization",
+                      "project":  "doughnut",
+                      "class":  "broad_flow",
+                      "prompt":  "Analyze Spring Data JPA optimization opportunities with repository/service/test evidence. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "Spring Data",
+                                                             "JPA"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "identifies data path",
+                                            "has benchmark plan",
+                                            "has tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "impact analysis"
+                                         ]
+                  },
+                  {
+                      "id":  "J15-jakarta-ee-ejb-transaction",
+                      "project":  "doughnut",
+                      "class":  "review_diff",
+                      "prompt":  "Review Jakarta EE EJB transaction changes for propagation, rollback, and contract risk. Return JSON.",
+                      "expectedEvidence":  {
+                                               "files":  [
+
+                                                         ],
+                                               "symbols":  [
+
+                                                           ],
+                                               "terms":  [
+                                                             "EJB",
+                                                             "transaction"
+                                                         ]
+                                           },
+                      "qualityRubric":  [
+                                            "detects transaction boundary",
+                                            "checks rollback",
+                                            "has tests"
+                                        ],
+                      "gateAssertions":  [
+                                             "java diff processor transaction-boundary"
+                                         ]
+                  }
+              ]
+}
