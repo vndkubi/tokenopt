@@ -70,6 +70,44 @@ If the packet is answerable, answer from it and do not call shell/search again.
 
 Avoid pasting setup or benchmark artifacts into normal prompts. Do not paste fields such as `injectedInstruction`, `actualPromptSentToCodex`, or `Project instruction injected by TokenOpt setup:` into chat.
 
+## Production Prompt vs Benchmark Harness
+
+Use the playbook prompts for day-to-day work. Use benchmark prompts only for measurement.
+
+| Prompt/source | Reuse in normal work? | Purpose | Notes |
+| --- | --- | --- | --- |
+| Standard Cost Router Prefix in this playbook | Yes | Production prompt policy | Keep it short and attach the real task. |
+| Installed repo/agent instructions | Yes | Persistent routing setup | Put tool names and routing rules here, not in every user prompt. |
+| Explicit smoke-test prompt | Sometimes | Verify the agent sees TokenOpt MCP | Use only when checking setup or debugging routing. |
+| Benchmark suite prompt | No | A/B measurement and deterministic scoring | It includes constraints, repo paths, output contracts, and shell/MCP controls that can increase tokens in normal use. |
+| Raw benchmark report prompt fields | No | Audit trail | Do not paste `codexPrompt`, `injectedInstruction`, or `Benchmark constraints` into chat. |
+
+When converting a benchmark task into a reusable prompt, keep only the task intent and optionally the short cost-router prefix.
+
+Benchmark harness prompt:
+
+```text
+Investigate the primary user/business flow in this repository. Return JSON with files, symbols, terms, risks, and evidence.
+
+Benchmark constraints:
+- Preserve the requested output format exactly.
+- Repository root: D:\Personal\Projects\doughnut
+- TokenOpt router selected strict acquisition for this task.
+- Call tokenopt_compile_evidence with cwd=...
+```
+
+Reusable production prompt:
+
+```text
+Choose the cheapest evidence path first.
+
+Use TokenOpt MCP as a cost gate if this can replace broad exploration.
+If answerable=true, answer from the packet and do not call shell/search again.
+
+Task:
+Investigate the primary user/business flow in this repository. Return files, symbols, terms, risks, and evidence.
+```
+
 ## Benchmark-Backed Routing Table
 
 This table summarizes the route behavior from the 37-prompt real Codex benchmark on the Doughnut repository. Token deltas compare `router-best` against baseline.
