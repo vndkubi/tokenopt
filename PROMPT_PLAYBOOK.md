@@ -508,6 +508,107 @@ Task:
 <your task>
 ```
 
+### 16. Spec Kit Implementation Planning
+
+Use this for `github/spec-kit` or a project initialized by Spec Kit when you want an implementation plan before editing files. This is a good TokenOpt-first workload when the owning integration, command, template, or test area is not already known.
+
+```text
+Choose the cheapest evidence path first.
+
+Use TokenOpt MCP as a cost gate if this can replace broad exploration.
+If answerable=true, answer from the packet and do not call shell/search again.
+If missing exists, use only exact TokenOpt followups.
+
+Task:
+Use the Spec Kit implementation workflow to plan this change:
+<describe the desired Spec Kit change>
+
+Return valid compact JSON only with:
+- files
+- symbols
+- implementation_steps
+- tests
+- risks
+- evidence
+```
+
+Example:
+
+```text
+Choose the cheapest evidence path first.
+
+Use TokenOpt MCP as a cost gate if this can replace broad exploration.
+If answerable=true, answer from the packet and do not call shell/search again.
+If missing exists, use only exact TokenOpt followups.
+
+Task:
+Use the Spec Kit implementation workflow to plan a small code change:
+add validation so integration keys cannot contain whitespace before integrations are registered or used by the Specify CLI.
+
+Return valid compact JSON only with files, symbols, implementation_steps, tests, risks, and evidence.
+```
+
+### 17. Spec Kit Actual Implementation
+
+Use this when the agent should edit files. Keep TokenOpt as a planning gate only; after the owner files are known, switch to narrow file reads and targeted tests.
+
+```text
+Choose the cheapest evidence path first.
+
+Use TokenOpt MCP once only if it can identify the owning Spec Kit integration, command, template, tests, or workflow cheaper than broad shell exploration.
+If TokenOpt returns answerable=true, use the packet as the implementation map and do not repeat exploration with broad shell/search.
+After ownership is known, edit only the narrow files needed.
+
+Task:
+Implement this Spec Kit change:
+<describe the change>
+
+Requirements:
+- Keep the change minimal and compatible with existing Spec Kit workflows.
+- Add or update targeted pytest coverage.
+- Run the narrowest relevant pytest command.
+- Report changed files, validation command, and remaining risks.
+
+Start with:
+Acquisition path:
+Reason:
+Fallback used:
+```
+
+### 18. Spec Kit A/B Benchmark Prompt
+
+Use this only when measuring cost with `tokenopt benchmark suite`, not for normal development. The benchmark prompt should be stricter than a production prompt so quality can be scored deterministically.
+
+```text
+Use the Spec Kit implementation workflow to plan a small code change:
+<describe the desired change>.
+
+Return valid compact JSON only with files, symbols, implementation_steps, tests, risks, and evidence.
+```
+
+Recommended suite fields:
+
+```json
+{
+  "class": "refactor_scope",
+  "qualityRubric": [
+    "identifies owning command or integration path",
+    "identifies relevant metadata or registry symbol",
+    "has implementation steps",
+    "has targeted tests",
+    "states compatibility risks"
+  ],
+  "maxBudget": {
+    "mcpCallsCompiled": 4,
+    "targetedShellCalls": 0,
+    "shellCallsAfterAnswerable": 0,
+    "packetTokens": 1600
+  }
+}
+```
+
+In a one-task Spec Kit benchmark against `github/spec-kit`, a planning prompt for integration-key whitespace validation measured `router-best` at `297,166` total tokens versus `927,192` baseline tokens, a `67.9%` reduction. That result applies to broad implementation planning, not necessarily to every exact code-edit task.
+
 ## Anti-Patterns
 
 Do not paste benchmark/report instructions into a normal prompt:
