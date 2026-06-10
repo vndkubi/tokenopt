@@ -16,6 +16,85 @@ Review current diff -> diff/review context first.
 Never repeat the same evidence acquisition with TokenOpt + CodeGraph + shell.
 ```
 
+## Setup Pattern
+
+TokenOpt needs two things to route normal prompts reliably:
+
+1. The `tokenopt` MCP server must be available to the agent.
+2. Repo or agent instructions must explain when to use TokenOpt as a cost gate.
+
+For Copilot-style setup in a target repo:
+
+```powershell
+cd <target-repo>
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both
+node <tokenopt-repo>\dist\cli.js doctor copilot
+```
+
+For a strict Codex MCP-only benchmark or session, disable the host shell tool and expose TokenOpt:
+
+```toml
+[features]
+shell_tool = false
+
+[mcp_servers.tokenopt]
+command = "node"
+args = ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"]
+required = true
+default_tools_approval_mode = "approve"
+```
+
+Lite mode exposes:
+
+```text
+tokenopt_compile_evidence
+tokenopt_search
+tokenopt_read_file
+```
+
+The normal user prompt should stay natural. The setup instructions, not the user prompt, should contain the tool contract.
+
+Good normal prompt after setup:
+
+```text
+Investigate the primary learning/recall flow and return files, symbols, risks, and evidence.
+```
+
+Good explicit smoke-test prompt:
+
+```text
+Use TokenOpt as a cost gate.
+Investigate the primary learning/recall flow.
+If the packet is answerable, answer from it and do not call shell/search again.
+```
+
+Avoid pasting setup or benchmark artifacts into normal prompts. Do not paste fields such as `injectedInstruction`, `actualPromptSentToCodex`, or `Project instruction injected by TokenOpt setup:` into chat.
+
+## Benchmark-Backed Routing Table
+
+This table summarizes the route behavior from the 37-prompt real Codex benchmark on the Doughnut repository. Token deltas compare `router-best` against baseline.
+
+| Use case | Route setup | Use TokenOpt first? | Benchmark result | Practical rule |
+| --- | --- | --- | --- | --- |
+| Broad repo flow, onboarding, context inspection, dependency/build analysis | MCP-first strict, shell off | Yes | `broad_flow`: `-82.3%` total tokens, quality improved from `0.845` to `0.905` | Use `tokenopt_compile_evidence` once, then answer or use exact allowed followups. |
+| Runtime/debug/build failure/root cause | MCP-first strict, shell off | Yes | `debug_runtime`: `-78.1%` total tokens, quality improved from `0.778` to `0.944` | Use TokenOpt first to compress failure evidence and keep followups exact. |
+| Refactor, migration, implementation planning | MCP-first strict, shell off | Usually yes | `refactor_scope`: `-74.4%` total tokens, same average quality `0.938` | Use TokenOpt for impact scope unless the owning file/class is already known. |
+| Unit-test planning or unknown owning test area | MCP-first strict, shell off | Yes for planning | `exact_symbol`: `-61.4%` total tokens, quality improved from `0.750` to `1.000` | For planning, TokenOpt is useful. For writing tests against a known class, use narrow reads directly. |
+| Review with a concrete diff or patch | Review evidence route | Yes if diff is present | Not separately isolated in this run | Give the actual diff. TokenOpt can compile review-shaped evidence. |
+| Review without a concrete diff | Hybrid fallback, shell on | No | `review_diff`: `+65.8%` total tokens, quality improved to `1.000` but expensive | Do not force MCP-first. Ask for the diff or use normal review flow. |
+| Small repo plus exact file/symbol | Bypass | No | Router marks this as negative control | Use native narrow read/search or CodeGraph. |
+| Exact class/method/line-level flow trace | Native narrow search/read or CodeGraph | Usually no | Hybrid double-spend risk | Use CodeGraph or narrow search/read directly unless you need a broad context summary first. |
+| Simple non-repo question or tiny command | Bypass | No | Not a TokenOpt workload | Answer directly or run the tiny command. |
+
+Aggregate from that benchmark:
+
+| Setup | Tasks | Correct | Token effect | Avg MCP | Avg shell |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `mcp-first-strict(shell-off)` | 28 | 23/28 | `-82.6%` total tokens | 4.1 | 0 |
+| `hybrid-review-fallback(shell-on)` | 9 | 9/9 | `+47.2%` total tokens | 0 | 39 |
+
+The main lesson is that strict MCP-first works when it replaces broad exploration. It loses when the agent pays both costs: TokenOpt or route setup plus broad shell fallback.
+
 ## What The Agent Should Report
 
 Add this contract when you want to audit whether the agent chose the right path:

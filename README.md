@@ -7,7 +7,7 @@ TokenOpt is a reusable context-budget middleware for coding agents. V1 is Codex-
 Full setup guide: [SETUP.md](SETUP.md).
 Copilot-specific setup: [COPILOT_SETUP.md](COPILOT_SETUP.md).
 Project idea and architecture: [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
-Prompt and routing playbook: [PROMPT_PLAYBOOK.md](PROMPT_PLAYBOOK.md).
+Prompt and benchmark-backed routing playbook: [PROMPT_PLAYBOOK.md](PROMPT_PLAYBOOK.md).
 
 ```bash
 npm install
