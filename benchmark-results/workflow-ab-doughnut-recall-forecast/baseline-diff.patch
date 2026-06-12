@@ -1,0 +1,597 @@
+diff --git a/backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java b/backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java
+index b73408fd12..2122d53d61 100644
+--- a/backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java
++++ b/backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java
+@@ -3,6 +3,7 @@ package com.odde.doughnut.controllers.dto;
+ import jakarta.validation.constraints.NotNull;
+ import java.sql.Timestamp;
+ import java.util.List;
++import java.util.Map;
+ import lombok.Getter;
+ import lombok.Setter;
+ 
+@@ -11,4 +12,5 @@ public class DueMemoryTrackers {
+   @Getter @Setter private Timestamp currentRecallWindowEndAt;
+   @Getter @Setter private List<MemoryTrackerLite> toRepeat;
+   @Getter @Setter private Integer dueInDays;
++  @Getter @Setter private Map<Integer, Integer> forecastCounts;
+ }
+diff --git a/backend/src/main/java/com/odde/doughnut/services/RecallService.java b/backend/src/main/java/com/odde/doughnut/services/RecallService.java
+index d7c737b57f..e41802efce 100644
+--- a/backend/src/main/java/com/odde/doughnut/services/RecallService.java
++++ b/backend/src/main/java/com/odde/doughnut/services/RecallService.java
+@@ -10,13 +10,16 @@ import com.odde.doughnut.entities.repositories.RecallPromptRepository;
+ import com.odde.doughnut.utils.TimestampOperations;
+ import java.sql.Timestamp;
+ import java.time.ZoneId;
++import java.util.LinkedHashMap;
+ import java.util.List;
++import java.util.Map;
+ import java.util.stream.Stream;
+ import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.stereotype.Service;
+ 
+ @Service
+ public class RecallService {
++  private static final List<Integer> FORECAST_WINDOWS_IN_DAYS = List.of(0, 3, 7, 14);
+ 
+   private final UserService userService;
+   private final MemoryTrackerRepository memoryTrackerRepository;
+@@ -46,19 +49,24 @@ public class RecallService {
+ 
+   public DueMemoryTrackers getDueMemoryTrackers(
+       User user, Timestamp currentUTCTimestamp, ZoneId timeZone, int dueInDays) {
+-    List<MemoryTrackerLite> toRepeat =
+-        getMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, dueInDays)
+-            .map(
+-                mt -> {
+-                  MemoryTrackerLite lite = new MemoryTrackerLite();
+-                  lite.setMemoryTrackerId(mt.getId());
+-                  lite.setSpelling(mt.getSpelling() != null && mt.getSpelling());
+-                  return lite;
+-                })
+-            .toList();
++    List<MemoryTrackerLite> toRepeat;
++    try (Stream<MemoryTracker> memoryTrackers =
++        getMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, dueInDays)) {
++      toRepeat =
++          memoryTrackers
++              .map(
++                  mt -> {
++                    MemoryTrackerLite lite = new MemoryTrackerLite();
++                    lite.setMemoryTrackerId(mt.getId());
++                    lite.setSpelling(mt.getSpelling() != null && mt.getSpelling());
++                    return lite;
++                  })
++              .toList();
++    }
+     DueMemoryTrackers dueMemoryTrackers = new DueMemoryTrackers();
+     dueMemoryTrackers.setDueInDays(dueInDays);
+     dueMemoryTrackers.setToRepeat(toRepeat);
++    dueMemoryTrackers.setForecastCounts(getForecastCounts(user, currentUTCTimestamp, timeZone));
+ 
+     // Set recall status
+     dueMemoryTrackers.totalAssimilatedCount = totalAssimilatedCount(user);
+@@ -68,8 +76,27 @@ public class RecallService {
+     return dueMemoryTrackers;
+   }
+ 
++  private Map<Integer, Integer> getForecastCounts(
++      User user, Timestamp currentUTCTimestamp, ZoneId timeZone) {
++    Map<Integer, Integer> forecastCounts = new LinkedHashMap<>();
++    for (Integer dueInDays : FORECAST_WINDOWS_IN_DAYS) {
++      forecastCounts.put(
++          dueInDays,
++          countMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, dueInDays));
++    }
++    return forecastCounts;
++  }
++
++  private int countMemoryTrackersNeedToRepeat(
++      User user, Timestamp currentUTCTimestamp, ZoneId timeZone, int dueInDays) {
++    try (Stream<MemoryTracker> memoryTrackers =
++        getMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, dueInDays)) {
++      return (int) memoryTrackers.count();
++    }
++  }
++
+   public int getToRecallCount(User user, Timestamp currentUTCTimestamp, ZoneId timeZone) {
+-    return (int) getMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, 0).count();
++    return countMemoryTrackersNeedToRepeat(user, currentUTCTimestamp, timeZone, 0);
+   }
+ 
+   public List<RecallPrompt> getPreviouslyAnsweredRecallPrompts(
+diff --git a/backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java b/backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java
+index 023639fd71..f15af0da19 100644
+--- a/backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java
++++ b/backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java
+@@ -5,6 +5,7 @@ import static org.hamcrest.Matchers.equalTo;
+ import static org.hamcrest.Matchers.is;
+ import static org.hamcrest.Matchers.nullValue;
+ 
++import com.odde.doughnut.controllers.dto.DueMemoryTrackers;
+ import com.odde.doughnut.entities.MemoryTracker;
+ import com.odde.doughnut.entities.Note;
+ import com.odde.doughnut.entities.User;
+@@ -28,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
+ public class RecallServiceWithSpacedRepetitionAlgorithmTest {
+   @Autowired MakeMe makeMe;
+   @Autowired UserService userService;
++  @Autowired RecallService recallService;
+   User user;
+   User anotherUser;
+ 
+@@ -120,6 +122,48 @@ public class RecallServiceWithSpacedRepetitionAlgorithmTest {
+     }
+   }
+ 
++  @Test
++  void shouldForecastDueCountsForStandardWindowsWithHalfDayAlignmentAndInactiveTrackersExcluded() {
++    Timestamp currentTime = makeMe.aTimestamp().of(1, 10).fromShanghai().please();
++    createMemoryTrackerDueAt(user, currentTime);
++    createMemoryTrackerDueAt(user, TimestampOperations.addHoursToTimestamp(currentTime, 73));
++    createMemoryTrackerDueAt(user, TimestampOperations.addHoursToTimestamp(currentTime, 169));
++    createMemoryTrackerDueAt(user, TimestampOperations.addHoursToTimestamp(currentTime, 337));
++    createMemoryTrackerDueAt(user, TimestampOperations.addHoursToTimestamp(currentTime, 339));
++    createMemoryTrackerDueAt(anotherUser, currentTime);
++
++    Note removedNote = makeMe.aNote().notebookOwnedBy(user).please();
++    makeMe
++        .aMemoryTrackerFor(removedNote)
++        .by(user)
++        .nextRecallAt(currentTime)
++        .removedFromTracking()
++        .please();
++
++    MemoryTracker deletedTracker =
++        createMemoryTrackerDueAt(user, TimestampOperations.addHoursToTimestamp(currentTime, 73));
++    deletedTracker.setDeletedAt(currentTime);
++    makeMe.entityPersister.merge(deletedTracker);
++    makeMe.entityPersister.flush();
++
++    DueMemoryTrackers dueNow =
++        recallService.getDueMemoryTrackers(user, currentTime, ZoneId.of("Asia/Shanghai"), 0);
++    DueMemoryTrackers dueInThreeDays =
++        recallService.getDueMemoryTrackers(user, currentTime, ZoneId.of("Asia/Shanghai"), 3);
++
++    assertThat(dueNow.getToRepeat().size(), equalTo(1));
++    assertThat(dueInThreeDays.getToRepeat().size(), equalTo(2));
++    assertThat(dueNow.getForecastCounts().get(0), equalTo(1));
++    assertThat(dueNow.getForecastCounts().get(3), equalTo(2));
++    assertThat(dueNow.getForecastCounts().get(7), equalTo(3));
++    assertThat(dueNow.getForecastCounts().get(14), equalTo(4));
++  }
++
++  private MemoryTracker createMemoryTrackerDueAt(User owner, Timestamp nextRecallAt) {
++    Note trackerNote = makeMe.aNote().notebookOwnedBy(owner).please();
++    return makeMe.aMemoryTrackerFor(trackerNote).by(owner).nextRecallAt(nextRecallAt).please();
++  }
++
+   private MemoryTracker getOneMemoryTrackerNeedToRepeat(Timestamp timestamp) {
+     return userService
+         .getMemoryTrackersNeedToRepeat(user, timestamp, ZoneId.of("Asia/Shanghai"))
+diff --git a/frontend/src/components/toolbars/MainMenu.stories.ts b/frontend/src/components/toolbars/MainMenu.stories.ts
+index 158470e333..14b0a1ebb6 100644
+--- a/frontend/src/components/toolbars/MainMenu.stories.ts
++++ b/frontend/src/components/toolbars/MainMenu.stories.ts
+@@ -38,6 +38,7 @@ const meta = {
+           toRepeat: [],
+           currentRecallWindowEndAt: "",
+           totalAssimilatedCount: 0,
++          forecastCounts: { 0: 0, 3: 0, 7: 0, 14: 0 },
+         },
+         unreadConversations: [],
+       }
+@@ -98,6 +99,7 @@ export const WithDueCount: Story = {
+           toRepeat: [],
+           currentRecallWindowEndAt: "",
+           totalAssimilatedCount: 0,
++          forecastCounts: { 0: 0, 3: 0, 7: 0, 14: 0 },
+         },
+         unreadConversations: [],
+       }
+@@ -142,6 +144,7 @@ export const WithRecallCount: Story = {
+           toRepeat: Array(789).fill({}),
+           currentRecallWindowEndAt: "",
+           totalAssimilatedCount: 0,
++          forecastCounts: { 0: 789, 3: 789, 7: 789, 14: 789 },
+         },
+         unreadConversations: [],
+       }
+@@ -191,6 +194,7 @@ export const WithUnreadMessages: Story = {
+           toRepeat: [],
+           currentRecallWindowEndAt: "",
+           totalAssimilatedCount: 0,
++          forecastCounts: { 0: 0, 3: 0, 7: 0, 14: 0 },
+         },
+         unreadConversations: mockConversations,
+       }
+diff --git a/frontend/src/components/toolbars/MainMenu.vue b/frontend/src/components/toolbars/MainMenu.vue
+index df750ef362..0dd24193e6 100644
+--- a/frontend/src/components/toolbars/MainMenu.vue
++++ b/frontend/src/components/toolbars/MainMenu.vue
+@@ -65,8 +65,12 @@ const showUserSettings = ref(false)
+ 
+ const { setDueCount, setAssimilatedCountOfTheDay, setTotalUnassimilatedCount } =
+   useAssimilationCount()
+-const { setToRepeat, setCurrentRecallWindowEndAt, setTotalAssimilatedCount } =
+-  useRecallData()
++const {
++  setToRepeat,
++  setCurrentRecallWindowEndAt,
++  setTotalAssimilatedCount,
++  setRecallForecastCounts,
++} = useRecallData()
+ 
+ const fetchMenuData = async () => {
+   const { data: menuData, error } = await UserController.getMenuData({
+@@ -88,6 +92,7 @@ const fetchMenuData = async () => {
+         menuData.recallStatus.currentRecallWindowEndAt
+       )
+       setTotalAssimilatedCount(menuData.recallStatus.totalAssimilatedCount)
++      setRecallForecastCounts(menuData.recallStatus.forecastCounts)
+     }
+     if (menuData.unreadConversations !== undefined) {
+       messageCenterConversations.unreadConversations =
+diff --git a/frontend/src/composables/useRecallData.ts b/frontend/src/composables/useRecallData.ts
+index b47f212bcf..9a7b5666fe 100644
+--- a/frontend/src/composables/useRecallData.ts
++++ b/frontend/src/composables/useRecallData.ts
+@@ -1,10 +1,16 @@
+ import { computed, ref } from "vue"
+ import { useRouter } from "vue-router"
+-import type { MemoryTrackerLite } from "@generated/doughnut-backend-api/types.gen"
++import type {
++  DueMemoryTrackers,
++  MemoryTrackerLite,
++} from "@generated/doughnut-backend-api/types.gen"
++
++type RecallForecastCounts = NonNullable<DueMemoryTrackers["forecastCounts"]>
+ 
+ const toRepeat = ref<MemoryTrackerLite[] | undefined>(undefined)
+ const currentRecallWindowEndAt = ref<string | undefined>(undefined)
+ const totalAssimilatedCount = ref<number | undefined>(undefined)
++const recallForecastCounts = ref<RecallForecastCounts | undefined>(undefined)
+ const isRecallPaused = ref(false)
+ const shouldResumeRecall = ref(false)
+ const treadmillMode = ref<boolean>(false)
+@@ -34,6 +40,12 @@ export function useRecallData() {
+     totalAssimilatedCount.value = count
+   }
+ 
++  const setRecallForecastCounts = (
++    forecastCounts: RecallForecastCounts | undefined
++  ) => {
++    recallForecastCounts.value = forecastCounts
++  }
++
+   const setIsRecallPaused = (paused: boolean) => {
+     isRecallPaused.value = paused
+   }
+@@ -68,6 +80,7 @@ export function useRecallData() {
+     toRepeat,
+     currentRecallWindowEndAt,
+     totalAssimilatedCount,
++    recallForecastCounts,
+     isRecallPaused,
+     shouldResumeRecall,
+     treadmillMode,
+@@ -76,6 +89,7 @@ export function useRecallData() {
+     setToRepeat,
+     setCurrentRecallWindowEndAt,
+     setTotalAssimilatedCount,
++    setRecallForecastCounts,
+     setIsRecallPaused,
+     resumeRecall,
+     clearShouldResumeRecall,
+diff --git a/frontend/src/pages/RecallPage.vue b/frontend/src/pages/RecallPage.vue
+index 631b63c6c9..eddd52c0a0 100644
+--- a/frontend/src/pages/RecallPage.vue
++++ b/frontend/src/pages/RecallPage.vue
+@@ -46,21 +46,27 @@
+       />
+       <template v-else-if="toRepeatCount === 0 && previousAnsweredQuestionCursor === undefined">
+         <div class="daisy-alert daisy-alert-success">
+-          You have finished all recalls for this half a day!
++          <span>You have finished all recalls for this half a day!</span>
++          <span class="daisy-badge daisy-badge-success daisy-badge-outline">
++            {{ dueNowDisplayCount }} due now
++          </span>
+         </div>
+         <div v-if="isLoadingMore" class="daisy-flex daisy-items-center daisy-gap-2 daisy-py-4">
+           <span class="daisy-loading daisy-loading-spinner daisy-loading-md"></span>
+           <span>Loading more items...</span>
+         </div>
+         <div v-else>
+-          <button role="button" class="daisy-btn daisy-btn-secondary" @click="loadMore(3)">
+-            Load more from next 3 days
+-          </button>
+-          <button role="button" class="daisy-btn daisy-btn-secondary" @click="loadMore(7)">
+-            Load more from next 7 days
+-          </button>
+-          <button role="button" class="daisy-btn daisy-btn-secondary" @click="loadMore(14)">
+-            Load more from next 14 days
++          <button
++            v-for="days in loadMoreWindows"
++            :key="days"
++            role="button"
++            class="daisy-btn daisy-btn-secondary"
++            @click="loadMore(days)"
++          >
++            Load more from next {{ days }} days
++            <span v-if="forecastMoreCount(days) !== undefined">
++              ({{ forecastMoreCount(days) }} more)
++            </span>
+           </button>
+         </div>
+       </template>
+@@ -106,6 +112,8 @@ const {
+   currentRecallWindowEndAt,
+   setCurrentRecallWindowEndAt,
+   totalAssimilatedCount,
++  recallForecastCounts,
++  setRecallForecastCounts,
+   setIsRecallPaused,
+   shouldResumeRecall,
+   clearShouldResumeRecall,
+@@ -127,6 +135,8 @@ const previousAnsweredQuestions = ref<(RecallPrompt | undefined)[]>([])
+ const previousAnsweredQuestionCursor = ref<number | undefined>(undefined)
+ const isProgressBarVisible = ref(true)
+ const isLoadingMore = ref(false)
++const loadedDueInDays = ref(0)
++const loadMoreWindows = [3, 7, 14] as const
+ 
+ // Sync currentIndex with useRecallData
+ watch(
+@@ -201,6 +211,18 @@ const getRemainingNonSpellingCount = (): number => {
+ }
+ 
+ const toRepeatCount = computed(() => getRemainingNonSpellingCount())
++const dueNowDisplayCount = computed(() =>
++  toRepeatCount.value === 0
++    ? 0
++    : (recallForecastCounts.value?.[0] ?? toRepeatCount.value)
++)
++
++const forecastMoreCount = (dueInDays: number): number | undefined => {
++  const targetCount = recallForecastCounts.value?.[dueInDays]
++  if (targetCount === undefined) return undefined
++  const baselineCount = recallForecastCounts.value?.[loadedDueInDays.value] ?? 0
++  return Math.max(0, targetCount - baselineCount)
++}
+ 
+ const viewLastAnsweredQuestion = (cursor: number | undefined) => {
+   previousAnsweredQuestionCursor.value = cursor
+@@ -257,7 +279,9 @@ const loadMore = async (dueInDays?: number) => {
+     if (!error && response) {
+       let trackers = response.toRepeat
+       currentIndex.value = 0
++      loadedDueInDays.value = response.dueInDays ?? dueInDays ?? 0
+       setDiligentMode((dueInDays ?? 0) > 0)
++      setRecallForecastCounts(response.forecastCounts)
+       if (trackers?.length === 0) {
+         setToRepeat(trackers)
+         return response
+diff --git a/frontend/tests/components/recall/Assimilation.spec.ts b/frontend/tests/components/recall/Assimilation.spec.ts
+index 7ed257e886..985b94e01e 100644
+--- a/frontend/tests/components/recall/Assimilation.spec.ts
++++ b/frontend/tests/components/recall/Assimilation.spec.ts
+@@ -54,6 +54,7 @@ beforeEach(() => {
+     toRepeat: ref(undefined),
+     currentRecallWindowEndAt: ref(undefined),
+     isRecallPaused: ref(false),
++    recallForecastCounts: ref(undefined),
+     shouldResumeRecall: ref(false),
+     treadmillMode: ref(false),
+     currentIndex: ref(0),
+@@ -61,6 +62,7 @@ beforeEach(() => {
+     setToRepeat: vi.fn(),
+     setCurrentRecallWindowEndAt: vi.fn(),
+     setTotalAssimilatedCount: vi.fn(),
++    setRecallForecastCounts: vi.fn(),
+     setIsRecallPaused: vi.fn(),
+     resumeRecall: vi.fn(),
+     clearShouldResumeRecall: vi.fn(),
+diff --git a/frontend/tests/pages/RecallPage.spec.ts b/frontend/tests/pages/RecallPage.spec.ts
+index 2552db4977..2e8df0c8f0 100644
+--- a/frontend/tests/pages/RecallPage.spec.ts
++++ b/frontend/tests/pages/RecallPage.spec.ts
+@@ -7,6 +7,7 @@ import {
+ import { useRecallData } from "@/composables/useRecallData"
+ import RecallPage from "@/pages/RecallPage.vue"
+ import type {
++  DueMemoryTrackers,
+   MemoryTrackerLite,
+   RecallPrompt,
+ } from "@generated/doughnut-backend-api"
+@@ -47,12 +48,14 @@ let renderer: RenderingHelper<typeof RecallPage>
+ let recallingSpy: ReturnType<typeof mockSdkService>
+ let previouslyAnsweredSpy: ReturnType<typeof mockSdkService>
+ let toRepeatRef: ReturnType<typeof ref<MemoryTrackerLite[] | undefined>>
++type RecallForecastCounts = NonNullable<DueMemoryTrackers["forecastCounts"]>
+ 
+ // Helper to create useRecallData mock return value
+ const createUseRecallDataMock = (overrides?: {
+   toRepeat?: MemoryTrackerLite[]
+   currentRecallWindowEndAt?: string
+   totalAssimilatedCount?: number
++  recallForecastCounts?: RecallForecastCounts
+   isRecallPaused?: boolean
+   shouldResumeRecall?: boolean
+   treadmillMode?: boolean
+@@ -63,12 +66,16 @@ const createUseRecallDataMock = (overrides?: {
+   const treadmillModeRef = ref(overrides?.treadmillMode ?? false)
+   const currentIndexRef = ref(overrides?.currentIndex ?? 0)
+   const diligentModeRef = ref(overrides?.diligentMode ?? false)
++  const recallForecastCountsRef = ref<RecallForecastCounts | undefined>(
++    overrides?.recallForecastCounts
++  )
+   const dueRecallsRefreshNonce = ref(0)
+   return {
+     toRepeatCount: computed(() => toRepeatRef.value?.length ?? 0),
+     toRepeat: toRepeatRef,
+     currentRecallWindowEndAt: ref(overrides?.currentRecallWindowEndAt),
+     totalAssimilatedCount: ref(overrides?.totalAssimilatedCount ?? 0),
++    recallForecastCounts: recallForecastCountsRef,
+     isRecallPaused: ref(overrides?.isRecallPaused ?? false),
+     shouldResumeRecall: ref(overrides?.shouldResumeRecall ?? false),
+     treadmillMode: treadmillModeRef,
+@@ -79,6 +86,11 @@ const createUseRecallDataMock = (overrides?: {
+     }),
+     setCurrentRecallWindowEndAt: vi.fn(),
+     setTotalAssimilatedCount: vi.fn(),
++    setRecallForecastCounts: vi.fn(
++      (forecastCounts: RecallForecastCounts | undefined) => {
++        recallForecastCountsRef.value = forecastCounts
++      }
++    ),
+     setIsRecallPaused: vi.fn(),
+     resumeRecall: vi.fn(),
+     clearShouldResumeRecall: vi.fn(),
+@@ -835,6 +847,25 @@ describe("repeat page", () => {
+       )
+     })
+ 
++    it("should show forecast counts on load more buttons", async () => {
++      vi.mocked(useRecallData).mockReturnValue(
++        createUseRecallDataMock({
++          toRepeat: [],
++          recallForecastCounts: { 0: 0, 3: 4, 7: 6, 14: 9 },
++        })
++      )
++
++      const wrapper = await mountPage()
++
++      expect(wrapper.text()).toContain("0 due now")
++      expect(wrapper.text()).toContain("Load more from next 3 days")
++      expect(wrapper.text()).toContain("(4 more)")
++      expect(wrapper.text()).toContain("Load more from next 7 days")
++      expect(wrapper.text()).toContain("(6 more)")
++      expect(wrapper.text()).toContain("Load more from next 14 days")
++      expect(wrapper.text()).toContain("(9 more)")
++    })
++
+     it("should show loading indicator when load more button is clicked", async () => {
+       const wrapper = await mountPage()
+ 
+diff --git a/frontend/tests/toolbars/MainMenu.spec.ts b/frontend/tests/toolbars/MainMenu.spec.ts
+index 7592d72c34..19110e6310 100644
+--- a/frontend/tests/toolbars/MainMenu.spec.ts
++++ b/frontend/tests/toolbars/MainMenu.spec.ts
+@@ -3,7 +3,11 @@ import MainMenu from "@/components/toolbars/MainMenu.vue"
+ import { useRecallData } from "@/composables/useRecallData"
+ import timezoneParam from "@/managedApi/window/timezoneParam"
+ import routes from "@/routes/routes"
+-import type { MemoryTrackerLite, User } from "@generated/doughnut-backend-api"
++import type {
++  DueMemoryTrackers,
++  MemoryTrackerLite,
++  User,
++} from "@generated/doughnut-backend-api"
+ import { fireEvent, screen } from "@testing-library/vue"
+ import makeMe from "doughnut-test-fixtures/makeMe"
+ import helper, { mockSdkService } from "@tests/helpers"
+@@ -40,6 +44,7 @@ const memoryTrackerLitesStub = (n: number): MemoryTrackerLite[] =>
+     memoryTrackerId: i + 1,
+     spelling: false,
+   }))
++type RecallForecastCounts = NonNullable<DueMemoryTrackers["forecastCounts"]>
+ 
+ const createMatchMediaSpy = (matches: boolean) =>
+   vi.spyOn(window, "matchMedia").mockImplementation((query: string) => {
+@@ -67,6 +72,7 @@ const defaultMenuData = {
+     toRepeat: [] as MemoryTrackerLite[],
+     currentRecallWindowEndAt: "",
+     totalAssimilatedCount: 0,
++    forecastCounts: { 0: 0, 3: 0, 7: 0, 14: 0 },
+   },
+   unreadConversations: [],
+ }
+@@ -89,6 +95,7 @@ const createUseRecallDataMock = (overrides?: {
+     overrides?.toRepeat ?? []
+   )
+   const currentIndex = ref(overrides?.currentIndex ?? 0)
++  const recallForecastCounts = ref<RecallForecastCounts | undefined>(undefined)
+   return {
+     toRepeatCount: computed(() => {
+       const length = toRepeat.value?.length ?? 0
+@@ -98,6 +105,7 @@ const createUseRecallDataMock = (overrides?: {
+     toRepeat,
+     currentRecallWindowEndAt: ref(undefined),
+     totalAssimilatedCount: ref(0),
++    recallForecastCounts,
+     isRecallPaused: ref(overrides?.isRecallPaused ?? false),
+     shouldResumeRecall: ref(false),
+     treadmillMode: ref(false),
+@@ -106,6 +114,11 @@ const createUseRecallDataMock = (overrides?: {
+     setToRepeat: vi.fn(),
+     setCurrentRecallWindowEndAt: vi.fn(),
+     setTotalAssimilatedCount: vi.fn(),
++    setRecallForecastCounts: vi.fn(
++      (forecastCounts: RecallForecastCounts | undefined) => {
++        recallForecastCounts.value = forecastCounts
++      }
++    ),
+     setIsRecallPaused: vi.fn(),
+     resumeRecall: (overrides?.resumeRecall ?? vi.fn()) as () => void,
+     clearShouldResumeRecall: vi.fn(),
+@@ -277,6 +290,7 @@ describe("main menu", () => {
+             toRepeat: memoryTrackerLitesStub(789),
+             currentRecallWindowEndAt: "",
+             totalAssimilatedCount: 0,
++            forecastCounts: { 0: 789, 3: 789, 7: 789, 14: 789 },
+           },
+         })
+       )
+diff --git a/packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts b/packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts
+index b5dd09b402..ec026e26f9 100644
+--- a/packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts
++++ b/packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts
+@@ -8,12 +8,25 @@ class DueMemoryTrackersBuilder extends Builder<DueMemoryTrackers> {
+   memoryTrackersToRepeat: MemoryTrackerLite[] = []
+ 
+   private totalAssimilatedCountToUse = 100
++  private forecastCountsToUse: NonNullable<DueMemoryTrackers['forecastCounts']> = {
++    0: 0,
++    3: 0,
++    7: 0,
++    14: 0,
++  }
+ 
+   totalAssimilatedCount(count: number) {
+     this.totalAssimilatedCountToUse = count
+     return this
+   }
+ 
++  forecastCounts(
++    forecastCounts: NonNullable<DueMemoryTrackers['forecastCounts']>
++  ) {
++    this.forecastCountsToUse = forecastCounts
++    return this
++  }
++
+   toRepeat(memoryTrackers: MemoryTrackerLite[]) {
+     this.memoryTrackersToRepeat = memoryTrackers
+     return this
+@@ -26,6 +39,7 @@ class DueMemoryTrackersBuilder extends Builder<DueMemoryTrackers> {
+       dueInDays: 0,
+       totalAssimilatedCount: this.totalAssimilatedCountToUse,
+       currentRecallWindowEndAt: new Date().toISOString(),
++      forecastCounts: this.forecastCountsToUse,
+     }
+   }
+ }
+diff --git a/packages/generated/doughnut-backend-api/types.gen.ts b/packages/generated/doughnut-backend-api/types.gen.ts
+index c17f3d41fe..795b70fc7e 100644
+--- a/packages/generated/doughnut-backend-api/types.gen.ts
++++ b/packages/generated/doughnut-backend-api/types.gen.ts
+@@ -721,6 +721,9 @@ export type DueMemoryTrackers = {
+     currentRecallWindowEndAt?: string;
+     toRepeat?: Array<MemoryTrackerLite>;
+     dueInDays?: number;
++    forecastCounts?: {
++        [key: string]: number;
++    };
+ };
+ 
+ export type MemoryTrackerLite = {

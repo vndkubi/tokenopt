@@ -25,6 +25,13 @@ export interface TokenEstimate {
   kind: TokenTextKind;
 }
 
+export interface BenchmarkUsageTokens {
+  input_tokens: number;
+  output_tokens: number;
+  reasoning_output_tokens: number;
+  cached_input_tokens?: number;
+}
+
 export const TOKEN_ESTIMATOR_VERSION = "ratio-v1";
 
 const DEFAULT_MIN_TOKENS = 1;
@@ -69,4 +76,8 @@ export function estimateTokensSaved(
     ...options,
     minTokens: 0
   });
+}
+
+export function totalUsageTokens(usage: BenchmarkUsageTokens): number {
+  return usage.input_tokens + usage.output_tokens + usage.reasoning_output_tokens;
 }

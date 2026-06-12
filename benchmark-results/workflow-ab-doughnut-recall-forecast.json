@@ -1,0 +1,424 @@
+{
+  "generatedAt": "2026-06-12T14:44:59.693Z",
+  "runner": "codex exec --json",
+  "codexPackage": "@openai/codex@0.137.0",
+  "repo": "D:\\Personal\\Projects\\doughnut",
+  "baseRef": "HEAD",
+  "baseCommit": "333e63f27cdbbfe673f7f63aba2282a474fa8aae",
+  "feature": {
+    "id": "doughnut-recall-forecast",
+    "title": "Doughnut recall forecast counts",
+    "prompt": "Implement a scoped PBI in Doughnut: As a learner, I want the Recall page to show how many recall items are due now and how many more would be loaded from the next 3, 7, and 14 days, so that I can decide whether to continue recalling without blindly clicking each load-more button.\n\nAcceptance criteria:\n- The recall API exposes forecast counts for due windows 0, 3, 7, and 14 days using the same timezone and half-day alignment rules as current recall loading.\n- Forecast counts are monotonic by window and exclude deleted/removed memory trackers.\n- Existing Load more from next 3/7/14 days behavior remains compatible.\n- The Recall page done state/buttons display forecast counts without breaking treadmill mode or existing current-session progress.\n- Add or update targeted backend and frontend tests where practical.\n- Keep edits scoped to recall DTO/service/controller/UI/composable/test surfaces; do not rewrite unrelated recall flows.",
+    "qualityRubric": [
+      "adds recall forecast counts for 0/3/7/14 day windows",
+      "uses existing timezone and half-day recall semantics",
+      "excludes deleted or removed memory trackers",
+      "keeps existing load-more behavior compatible",
+      "updates UI to surface counts on recall done/load-more state",
+      "adds targeted tests or clearly explains validation blockers"
+    ],
+    "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\""
+  },
+  "workflows": [
+    "baseline",
+    "tokenopt",
+    "speckit",
+    "speckit-tokenopt"
+  ],
+  "rows": [
+    {
+      "exitCode": null,
+      "durationMs": 903706,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "toolCalls": 91,
+      "shellCalls": 91,
+      "mcpCalls": 0,
+      "toolInputChars": 15821,
+      "toolOutputChars": 528093,
+      "warnings": 971,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\baseline-codex.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\baseline-last.txt",
+      "workflow": "baseline",
+      "repo": "D:\\Personal\\Projects\\doughnut",
+      "worktree": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\worktrees\\baseline",
+      "baseCommit": "333e63f27cdbbfe673f7f63aba2282a474fa8aae",
+      "featureId": "doughnut-recall-forecast",
+      "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\"",
+      "testExitCode": 1,
+      "testDurationMs": 160,
+      "testOutputPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\baseline-test-output.txt",
+      "testsPassed": false,
+      "changedFiles": [
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+        "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+        "backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java",
+        "frontend/src/components/toolbars/MainMenu.stories.ts",
+        "frontend/src/components/toolbars/MainMenu.vue",
+        "frontend/src/composables/useRecallData.ts",
+        "frontend/src/pages/RecallPage.vue",
+        "frontend/tests/components/recall/Assimilation.spec.ts",
+        "frontend/tests/pages/RecallPage.spec.ts",
+        "frontend/tests/toolbars/MainMenu.spec.ts",
+        "packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts",
+        "packages/generated/doughnut-backend-api/types.gen.ts"
+      ],
+      "diffShortStat": "12 files changed, 208 insertions(+), 24 deletions(-)",
+      "diffStat": ".../controllers/dto/DueMemoryTrackers.java         |  2 +\n .../com/odde/doughnut/services/RecallService.java  | 49 +++++++++++++++++-----\n ...llServiceWithSpacedRepetitionAlgorithmTest.java | 44 +++++++++++++++++++\n .../src/components/toolbars/MainMenu.stories.ts    |  4 ++\n frontend/src/components/toolbars/MainMenu.vue      |  9 +++-\n frontend/src/composables/useRecallData.ts          | 16 ++++++-\n frontend/src/pages/RecallPage.vue                  | 42 +++++++++++++++----\n .../tests/components/recall/Assimilation.spec.ts   |  2 +\n frontend/tests/pages/RecallPage.spec.ts            | 31 ++++++++++++++\n frontend/tests/toolbars/MainMenu.spec.ts           | 16 ++++++-\n .../src/DueMemoryTrackersBuilder.ts                | 14 +++++++\n .../generated/doughnut-backend-api/types.gen.ts    |  3 ++\n 12 files changed, 208 insertions(+), 24 deletions(-)",
+      "diffPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\baseline-diff.patch",
+      "qualityScore": 0.455,
+      "qualityChecks": "5/11",
+      "qualityPassed": false,
+      "qualityDetails": [
+        {
+          "name": "codex_exit_zero",
+          "passed": false
+        },
+        {
+          "name": "tests_passed",
+          "passed": false
+        },
+        {
+          "name": "changed_files_present",
+          "passed": true
+        },
+        {
+          "name": "diff_non_empty",
+          "passed": true
+        },
+        {
+          "name": "final_answer_mentions_tests",
+          "passed": false
+        },
+        {
+          "name": "rubric:adds recall forecast counts for 0/3/7/14 day windows",
+          "passed": true
+        },
+        {
+          "name": "rubric:uses existing timezone and half-day recall semantics",
+          "passed": false
+        },
+        {
+          "name": "rubric:excludes deleted or removed memory trackers",
+          "passed": true
+        },
+        {
+          "name": "rubric:keeps existing load-more behavior compatible",
+          "passed": false
+        },
+        {
+          "name": "rubric:updates UI to surface counts on recall done/load-more state",
+          "passed": false
+        },
+        {
+          "name": "rubric:adds targeted tests or clearly explains validation blockers",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "exitCode": null,
+      "durationMs": 900005,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "toolCalls": 66,
+      "shellCalls": 60,
+      "mcpCalls": 6,
+      "toolInputChars": 15138,
+      "toolOutputChars": 296023,
+      "warnings": 1056,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\tokenopt-codex.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\tokenopt-last.txt",
+      "workflow": "tokenopt",
+      "repo": "D:\\Personal\\Projects\\doughnut",
+      "worktree": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\worktrees\\tokenopt",
+      "baseCommit": "333e63f27cdbbfe673f7f63aba2282a474fa8aae",
+      "featureId": "doughnut-recall-forecast",
+      "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\"",
+      "testExitCode": 1,
+      "testDurationMs": 7030,
+      "testOutputPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\tokenopt-test-output.txt",
+      "testsPassed": false,
+      "changedFiles": [
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+        "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+        "backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java",
+        "frontend/src/components/toolbars/MainMenu.vue",
+        "frontend/src/composables/useRecallData.ts",
+        "frontend/src/pages/RecallPage.vue",
+        "frontend/tests/components/recall/Assimilation.spec.ts",
+        "frontend/tests/pages/RecallPage.spec.ts",
+        "frontend/tests/toolbars/MainMenu.spec.ts",
+        "open_api_docs.yaml",
+        "packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts",
+        "packages/generated/doughnut-backend-api/types.gen.ts"
+      ],
+      "diffShortStat": "12 files changed, 204 insertions(+), 6 deletions(-)",
+      "diffStat": ".../controllers/dto/DueMemoryTrackers.java         |  2 +\n .../com/odde/doughnut/services/RecallService.java  | 17 +++++++\n ...llServiceWithSpacedRepetitionAlgorithmTest.java | 43 ++++++++++++++++\n frontend/src/components/toolbars/MainMenu.vue      |  9 +++-\n frontend/src/composables/useRecallData.ts          | 14 +++++-\n frontend/src/pages/RecallPage.vue                  | 38 +++++++++++++--\n .../tests/components/recall/Assimilation.spec.ts   |  2 +\n frontend/tests/pages/RecallPage.spec.ts            | 57 ++++++++++++++++++++++\n frontend/tests/toolbars/MainMenu.spec.ts           |  8 +++\n open_api_docs.yaml                                 |  5 ++\n .../src/DueMemoryTrackersBuilder.ts                | 12 +++++\n .../generated/doughnut-backend-api/types.gen.ts    |  3 ++\n 12 files changed, 204 insertions(+), 6 deletions(-)",
+      "diffPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\tokenopt-diff.patch",
+      "qualityScore": 0.455,
+      "qualityChecks": "5/11",
+      "qualityPassed": false,
+      "qualityDetails": [
+        {
+          "name": "codex_exit_zero",
+          "passed": false
+        },
+        {
+          "name": "tests_passed",
+          "passed": false
+        },
+        {
+          "name": "changed_files_present",
+          "passed": true
+        },
+        {
+          "name": "diff_non_empty",
+          "passed": true
+        },
+        {
+          "name": "final_answer_mentions_tests",
+          "passed": false
+        },
+        {
+          "name": "rubric:adds recall forecast counts for 0/3/7/14 day windows",
+          "passed": true
+        },
+        {
+          "name": "rubric:uses existing timezone and half-day recall semantics",
+          "passed": false
+        },
+        {
+          "name": "rubric:excludes deleted or removed memory trackers",
+          "passed": true
+        },
+        {
+          "name": "rubric:keeps existing load-more behavior compatible",
+          "passed": false
+        },
+        {
+          "name": "rubric:updates UI to surface counts on recall done/load-more state",
+          "passed": false
+        },
+        {
+          "name": "rubric:adds targeted tests or clearly explains validation blockers",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "exitCode": null,
+      "durationMs": 900003,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "toolCalls": 82,
+      "shellCalls": 82,
+      "mcpCalls": 0,
+      "toolInputChars": 12460,
+      "toolOutputChars": 284682,
+      "warnings": 1041,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-codex.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-last.txt",
+      "workflow": "speckit",
+      "repo": "D:\\Personal\\Projects\\doughnut",
+      "worktree": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\worktrees\\speckit",
+      "baseCommit": "333e63f27cdbbfe673f7f63aba2282a474fa8aae",
+      "featureId": "doughnut-recall-forecast",
+      "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\"",
+      "testExitCode": 1,
+      "testDurationMs": 49,
+      "testOutputPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-test-output.txt",
+      "testsPassed": false,
+      "changedFiles": [
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+        "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+        "backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java",
+        "frontend/src/components/toolbars/MainMenu.vue",
+        "frontend/src/composables/useRecallData.ts",
+        "frontend/src/pages/RecallPage.vue",
+        "frontend/tests/pages/RecallPage.spec.ts",
+        "frontend/tests/toolbars/MainMenu.spec.ts",
+        "packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts",
+        "packages/generated/doughnut-backend-api/types.gen.ts",
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/RecallForecast.java",
+        "specs/workflow-ab-doughnut-recall-forecast/plan.md",
+        "specs/workflow-ab-doughnut-recall-forecast/spec.md",
+        "specs/workflow-ab-doughnut-recall-forecast/tasks.md"
+      ],
+      "diffShortStat": "10 files changed, 177 insertions(+), 11 deletions(-); 4 untracked files",
+      "diffStat": ".../controllers/dto/DueMemoryTrackers.java         |  1 +\n .../com/odde/doughnut/services/RecallService.java  | 18 +++++++++\n ...llServiceWithSpacedRepetitionAlgorithmTest.java | 46 ++++++++++++++++++++++\n frontend/src/components/toolbars/MainMenu.vue      |  9 ++++-\n frontend/src/composables/useRecallData.ts          | 14 ++++++-\n frontend/src/pages/RecallPage.vue                  | 31 +++++++++++++--\n frontend/tests/pages/RecallPage.spec.ts            | 30 ++++++++++++++\n frontend/tests/toolbars/MainMenu.spec.ts           |  9 +++++\n .../src/DueMemoryTrackersBuilder.ts                | 14 +++++++\n .../generated/doughnut-backend-api/types.gen.ts    | 16 +++++---\n 10 files changed, 177 insertions(+), 11 deletions(-); 4 untracked files",
+      "diffPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-diff.patch",
+      "qualityScore": 0.75,
+      "qualityChecks": "9/12",
+      "qualityPassed": false,
+      "qualityDetails": [
+        {
+          "name": "codex_exit_zero",
+          "passed": false
+        },
+        {
+          "name": "tests_passed",
+          "passed": false
+        },
+        {
+          "name": "changed_files_present",
+          "passed": true
+        },
+        {
+          "name": "diff_non_empty",
+          "passed": true
+        },
+        {
+          "name": "final_answer_mentions_tests",
+          "passed": true
+        },
+        {
+          "name": "speckit_artifacts_created",
+          "passed": true
+        },
+        {
+          "name": "rubric:adds recall forecast counts for 0/3/7/14 day windows",
+          "passed": true
+        },
+        {
+          "name": "rubric:uses existing timezone and half-day recall semantics",
+          "passed": true
+        },
+        {
+          "name": "rubric:excludes deleted or removed memory trackers",
+          "passed": true
+        },
+        {
+          "name": "rubric:keeps existing load-more behavior compatible",
+          "passed": true
+        },
+        {
+          "name": "rubric:updates UI to surface counts on recall done/load-more state",
+          "passed": false
+        },
+        {
+          "name": "rubric:adds targeted tests or clearly explains validation blockers",
+          "passed": true
+        }
+      ]
+    },
+    {
+      "exitCode": null,
+      "durationMs": 901400,
+      "usage": {
+        "input_tokens": 0,
+        "cached_input_tokens": 0,
+        "output_tokens": 0,
+        "reasoning_output_tokens": 0
+      },
+      "toolCalls": 65,
+      "shellCalls": 64,
+      "mcpCalls": 1,
+      "toolInputChars": 13742,
+      "toolOutputChars": 334644,
+      "warnings": 821,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-tokenopt-codex.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-tokenopt-last.txt",
+      "workflow": "speckit-tokenopt",
+      "repo": "D:\\Personal\\Projects\\doughnut",
+      "worktree": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\worktrees\\speckit-tokenopt",
+      "baseCommit": "333e63f27cdbbfe673f7f63aba2282a474fa8aae",
+      "featureId": "doughnut-recall-forecast",
+      "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\"",
+      "testExitCode": 1,
+      "testDurationMs": 90,
+      "testOutputPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-tokenopt-test-output.txt",
+      "testsPassed": false,
+      "changedFiles": [
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+        "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+        "backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java",
+        "frontend/src/components/toolbars/MainMenu.vue",
+        "frontend/src/composables/useRecallData.ts",
+        "frontend/src/pages/RecallPage.vue",
+        "frontend/tests/components/recall/Assimilation.spec.ts",
+        "frontend/tests/pages/RecallPage.spec.ts",
+        "frontend/tests/toolbars/MainMenu.spec.ts",
+        "open_api_docs.yaml",
+        "packages/doughnut-test-fixtures/src/DueMemoryTrackersBuilder.ts",
+        "packages/generated/doughnut-backend-api/types.gen.ts",
+        "backend/src/main/java/com/odde/doughnut/controllers/dto/RecallWindowCount.java",
+        "specs/workflow-ab-doughnut-recall-forecast/plan.md",
+        "specs/workflow-ab-doughnut-recall-forecast/spec.md",
+        "specs/workflow-ab-doughnut-recall-forecast/tasks.md"
+      ],
+      "diffShortStat": "12 files changed, 236 insertions(+), 9 deletions(-); 4 untracked files",
+      "diffStat": ".../controllers/dto/DueMemoryTrackers.java         |  1 +\n .../com/odde/doughnut/services/RecallService.java  | 19 +++++-\n ...llServiceWithSpacedRepetitionAlgorithmTest.java | 69 ++++++++++++++++++++++\n frontend/src/components/toolbars/MainMenu.vue      |  9 ++-\n frontend/src/composables/useRecallData.ts          | 12 +++-\n frontend/src/pages/RecallPage.vue                  | 40 +++++++++++--\n .../tests/components/recall/Assimilation.spec.ts   |  2 +\n frontend/tests/pages/RecallPage.spec.ts            | 56 ++++++++++++++++++\n frontend/tests/toolbars/MainMenu.spec.ts           |  4 ++\n open_api_docs.yaml                                 | 16 +++++\n .../src/DueMemoryTrackersBuilder.ts                | 11 +++-\n .../generated/doughnut-backend-api/types.gen.ts    |  6 ++\n 12 files changed, 236 insertions(+), 9 deletions(-); 4 untracked files",
+      "diffPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\workflow-ab-doughnut-recall-forecast\\speckit-tokenopt-diff.patch",
+      "qualityScore": 0.769,
+      "qualityChecks": "10/13",
+      "qualityPassed": false,
+      "qualityDetails": [
+        {
+          "name": "codex_exit_zero",
+          "passed": false
+        },
+        {
+          "name": "tests_passed",
+          "passed": false
+        },
+        {
+          "name": "changed_files_present",
+          "passed": true
+        },
+        {
+          "name": "diff_non_empty",
+          "passed": true
+        },
+        {
+          "name": "final_answer_mentions_tests",
+          "passed": false
+        },
+        {
+          "name": "speckit_artifacts_created",
+          "passed": true
+        },
+        {
+          "name": "hybrid_used_tokenopt_mcp",
+          "passed": true
+        },
+        {
+          "name": "rubric:adds recall forecast counts for 0/3/7/14 day windows",
+          "passed": true
+        },
+        {
+          "name": "rubric:uses existing timezone and half-day recall semantics",
+          "passed": true
+        },
+        {
+          "name": "rubric:excludes deleted or removed memory trackers",
+          "passed": true
+        },
+        {
+          "name": "rubric:keeps existing load-more behavior compatible",
+          "passed": true
+        },
+        {
+          "name": "rubric:updates UI to surface counts on recall done/load-more state",
+          "passed": true
+        },
+        {
+          "name": "rubric:adds targeted tests or clearly explains validation blockers",
+          "passed": true
+        }
+      ]
+    }
+  ]
+}

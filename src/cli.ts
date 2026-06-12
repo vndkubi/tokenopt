@@ -5,6 +5,7 @@ import { runBenchmarkCommand } from "./benchmark.js";
 import { runCodexBenchmarkCommand } from "./codex-benchmark.js";
 import { setupCopilotProject, type CopilotSetupScope } from "./copilot-setup.js";
 import { runSuiteBenchmarkCommand } from "./suite-benchmark.js";
+import { runWorkflowAbBenchmarkCommand } from "./workflow-ab-benchmark.js";
 import { loadConfig, makeDefaultRepoConfig, ensureConfigDir } from "./config.js";
 import { handleCodexHook } from "./codex-adapter.js";
 import { handleCopilotHook } from "./copilot-adapter.js";
@@ -127,6 +128,9 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 
   if (command === "benchmark") {
+    if (subcommand === "workflow-ab") {
+      return runWorkflowAbBenchmarkCommand(rest);
+    }
     if (subcommand === "suite") {
       return runSuiteBenchmarkCommand(rest);
     }
@@ -407,6 +411,7 @@ Commands:
   tokenopt benchmark daily --repo <path> [--mode all]
   tokenopt benchmark codex-daily --repo <path> [--mode all]
   tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline,mcp-first|router-best]
+  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-tokenopt]
   tokenopt instructions audit
   tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
   tokenopt instructions graph

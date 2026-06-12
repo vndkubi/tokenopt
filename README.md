@@ -190,6 +190,14 @@ node dist/cli.js benchmark codex-daily --repo <target-repo> --task build-handoff
 
 This runner executes `npx @openai/codex@0.137.0 exec --json`, parses `turn.completed.usage`, counts shell and MCP tool calls, records raw JSONL logs, and scores the final Codex answer with the same task rubric.
 
+For implementation workflow A/B measurement:
+
+```bash
+node dist/cli.js benchmark workflow-ab --repo <target-repo> --feature-file <feature.json> --workflow baseline,tokenopt,speckit,speckit-tokenopt --out benchmark-results/workflow-ab.json --markdown benchmark-results/workflow-ab.md --show-answers
+```
+
+This runner creates isolated git worktrees from the same base commit, runs the feature with baseline Codex instructions, TokenOpt evidence-first instructions, Spec Kit style specify/plan/tasks/implement instructions, and an optional hybrid Spec Kit + TokenOpt evidence-gate workflow, parses real Codex usage, runs the configured validation command, and reports token burn, diff stats, changed files, quality checks, and raw log paths.
+
 Modes:
 
 ```text

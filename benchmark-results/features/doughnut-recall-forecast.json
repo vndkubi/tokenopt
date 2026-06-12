@@ -1,0 +1,14 @@
+{
+  "id": "doughnut-recall-forecast",
+  "title": "Doughnut recall forecast counts",
+  "prompt": "Implement a scoped PBI in Doughnut: As a learner, I want the Recall page to show how many recall items are due now and how many more would be loaded from the next 3, 7, and 14 days, so that I can decide whether to continue recalling without blindly clicking each load-more button.\n\nAcceptance criteria:\n- The recall API exposes forecast counts for due windows 0, 3, 7, and 14 days using the same timezone and half-day alignment rules as current recall loading.\n- Forecast counts are monotonic by window and exclude deleted/removed memory trackers.\n- Existing Load more from next 3/7/14 days behavior remains compatible.\n- The Recall page done state/buttons display forecast counts without breaking treadmill mode or existing current-session progress.\n- Add or update targeted backend and frontend tests where practical.\n- Keep edits scoped to recall DTO/service/controller/UI/composable/test surfaces; do not rewrite unrelated recall flows.",
+  "qualityRubric": [
+    "adds recall forecast counts for 0/3/7/14 day windows",
+    "uses existing timezone and half-day recall semantics",
+    "excludes deleted or removed memory trackers",
+    "keeps existing load-more behavior compatible",
+    "updates UI to surface counts on recall done/load-more state",
+    "adds targeted tests or clearly explains validation blockers"
+  ],
+  "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\""
+}
