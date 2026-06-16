@@ -1236,12 +1236,14 @@ function naturalEvidenceSlotsForTask(task: Pick<SuiteTask, "class" | "prompt">, 
   if (taskType === "implement") {
     return ["scope", "owner_flow", "files_to_change", "symbols", "existing_tests", "implementation_steps", "validation_commands", "compatibility_risks"];
   }
-  if (/business|pbi|acceptance criteria|ui|frontend|page|learner|user experience|treadmill|load more|bug|wrong answer|retry/i.test(idClassPrompt)) {
+  if (/business|pbi|acceptance criteria|bug|wrong answer|retry|ui|frontend|page|user experience|treadmill|load more/i.test(idClassPrompt)) {
     slots.add("backend_entrypoint_api");
     slots.add("service_domain_logic");
-    slots.add("frontend_state_or_caller_when_present");
     slots.add("business_invariants_or_bug_symptom");
     slots.add("validation_commands");
+  }
+  if (/ui|frontend|page|user experience|treadmill|load more/i.test(idClassPrompt)) {
+    slots.add("frontend_state_or_caller_when_present");
   }
   if (taskType === "api_flow" || taskType === "startup_flow" || taskType === "investigate" || taskType === "field_impact") {
     slots.add("entrypoint_or_owner");
@@ -1265,6 +1267,8 @@ function naturalContextBrokerPlanLines(
     `- Repository root for any context broker or bounded source tool that asks for cwd/root: ${repo}.`,
     `- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=${taskType}, required_slots=${JSON.stringify(requiredSlots)}, budget_tokens around ${packetTokens}, and quality_rubric=${qualityRubricJson}.`,
     "- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.",
+    "- If the broker returns required_output_identifiers or suggested_symbols, preserve those exact identifiers in the closest requested output field such as symbols, files, tests_to_run, risks, unknowns, or fix_plan; when the requested JSON has a symbols key, start that array with suggested_symbols exactly, then add optional extras only if space remains.",
+    "- Keep compact JSON concise: use string arrays for files, symbols, tests, and risks unless the user explicitly asks for nested detail; keep the final object comfortably under the requested character limit so it remains valid JSON.",
     "- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.",
     "- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.",
     "- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.",
@@ -2551,7 +2555,7 @@ Notes:
   - codegraph-only injects CodeGraph MCP and disables shell_tool.
   - tokenopt-codegraph injects TokenOpt and CodeGraph MCP, disables shell_tool, and measures evidence-grounded idea quality.
   - tokenopt-codegraph-adaptive uses one evidence-broker policy: TokenOpt-only for review/security/missing-artifact tasks, compact TokenOpt+CodeGraph for flow/implement/refactor tasks, and disables shell_tool.
-  - contextgate-natural injects only the ContextGate broker plus bounded TokenOpt search/read followups; it does not expose CodeGraph directly to the agent.
+  - contextgate-natural injects only the ContextGate broker; low-level TokenOpt search/read and CodeGraph are not exposed directly to the agent.
   - tokenopt-codegraph-hybrid injects TokenOpt and CodeGraph MCP, then allows a bounded exact rg/slice fallback only when CodeGraph is unavailable or missing required slots.
   - --prewarm-codegraph runs codegraph index once per selected repo before Codex runs and adds --no-prewarm to per-run MCP servers.
   - mcp-first injects TokenOpt MCP and allows shell fallback only after exact TokenOpt followups.

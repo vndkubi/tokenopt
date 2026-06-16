@@ -75,16 +75,12 @@ test("mcp full mode exposes command and project facts tools", async () => {
   );
 });
 
-test("mcp broker mode hides legacy compile tool", async () => {
+test("mcp broker mode exposes only the natural broker", async () => {
   await withTokenOptMcp(
     async (client) => {
       const result = await client.listTools();
       const names = result.tools.map((tool) => tool.name).sort();
-      assert.deepEqual(names, [
-        "contextgate_get_context",
-        "tokenopt_read_file",
-        "tokenopt_search"
-      ]);
+      assert.deepEqual(names, ["contextgate_get_context"]);
     },
     { env: { TOKENOPT_MCP_MODE: "broker" } }
   );
@@ -145,8 +141,15 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
       assert.match(packet.content[0].text, /coverage contract/);
       assert.match(packet.content[0].text, /evidence_contract_pass: true/);
       assert.match(packet.content[0].text, /Missing:\n- none/);
+      assert.match(packet.content[0].text, /suggested_symbols=/);
+      assert.match(packet.content[0].text, /required_output_identifiers=/);
+      assert.match(packet.content[0].text, /start that array with suggested_symbols exactly/);
+      assert.match(packet.content[0].text, /Keep compact JSON short enough to remain valid/);
+      assert.match(packet.content[0].text, /Final output identifier checklist/);
       assert.match(packet.content[0].text, /ContextGate broker inline source evidence/);
       assert.match(packet.content[0].text, /broker_key_anchors/);
+      assert.match(packet.content[0].text, /broker_suggested_symbols/);
+      assert.match(packet.content[0].text, /broker_must_carry_terms/);
       assert.match(packet.content[0].text, /OrderService -> src\/orders\/OrderService\.ts/);
       assert.match(packet.content[0].text, /src\/orders\/OrderService\.ts/);
       assert.match(packet.content[0].text, /test\/orders\/OrderService\.test\.ts/);
@@ -155,6 +158,7 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
       assert.equal(packet.structuredContent.effectiveAnswerable, true);
       assert.equal(packet.structuredContent.inlineEvidence.coverage.feature_test_grounding, "covered");
       assert.equal(packet.structuredContent.inlineEvidence.anchors.some((anchor) => anchor.term === "OrderService"), true);
+      assert.equal(packet.structuredContent.inlineEvidence.carryTerms.includes("OrderService"), true);
       assert.equal(packet.structuredContent.inlineEvidence.slices.some((slice) => Object.hasOwn(slice, "text")), false);
       assert.equal(packet.structuredContent.inlineEvidence.slices.every((slice) => Number.isInteger(slice.textChars)), true);
       assert.equal(packet.structuredContent.naturalToolPolicy, "coverage-contract");

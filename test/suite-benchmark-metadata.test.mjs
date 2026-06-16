@@ -103,6 +103,9 @@ test("contextgate natural prompt uses evidence contract instead of fixed tool ca
   assert.match(prompt, /Evidence slots to satisfy/);
   assert.match(prompt, /context broker/i);
   assert.match(prompt, /Keep the user's prompt, project instructions, and agent instructions authoritative/);
+  assert.match(prompt, /required_output_identifiers or suggested_symbols/);
+  assert.match(prompt, /start that array with suggested_symbols exactly/);
+  assert.match(prompt, /Keep compact JSON concise/);
   assert.doesNotMatch(prompt, /tokenopt_compile_evidence/);
   assert.doesNotMatch(prompt, /get_file_slice/);
   assert.doesNotMatch(prompt, /TokenOpt/);

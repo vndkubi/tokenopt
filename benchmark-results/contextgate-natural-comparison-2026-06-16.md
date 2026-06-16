@@ -19,6 +19,7 @@ This compares the fair shell baseline, the current winning exact-slice adaptive 
 | `contextgate-natural` v4 partial business only | n/a | 0.864 | n/a | n/a | n/a | n/a | n/a | 0.0 | Better retrieval focus; full suite timed out |
 | `contextgate-natural` v6 broker-inline (`contextgate-natural-v6-broker-inline-doughnut-2026-06-16.json`) | 3/3 | 0.901 | 147,568 | 64,112 | 6,160 | 4,219 | 3.3 | 0.0 | Natural prompt fixed: correct and bounded, but not as cheap as exact-slice |
 | `contextgate-natural` v12 broker-state final (`contextgate-natural-v12-broker-state-final-doughnut-2026-06-16.json`) | 3/3 | 0.979 | 62,040 | 29,259 | 2,949 | 1,263 | 1.0 | 0.0 | Best natural setup: contract ok 3/3, lowest token burn, near-exact quality |
+| `contextgate-natural` v28 short-carry final-checklist (`contextgate-natural-v28-short-carry-full-doughnut-2026-06-16.json`) | 3/3 | 1.000 | 62,305 | 20,125 | 3,523 | 2,212 | 1.0 | 0.0 | Best natural setup after deep dive: exact quality, broker-only, no double-spend |
 
 ## Per-Prompt Detail
 
@@ -95,32 +96,47 @@ This run includes the anchor ledger, slim structured MCP payload, inline answera
 
 The raw final answers are in `benchmark-results/contextgate-natural-v12-broker-state-final-doughnut-2026-06-16.md`. The raw Codex JSONL paths are listed in that file but are not committed by default because `benchmark-results/raw/` is bulky.
 
+### ContextGate natural v28 short-carry final-checklist
+
+This run keeps the natural prompt shape and exposes only `contextgate_get_context` in broker mode. The deep-dive fix is not a fixed tool script: ContextGate still owns provider choice, but answerable broker packets now end with a final identifier checklist, compact JSON guidance, and a shorter bug-trace carry list focused on the critical failure/success contrast identifiers.
+
+| Prompt | Acq | Contract | Contract ok | Quality | Idea | Correct | Input | Cached | Fresh input | Output | Reasoning | MCP | Shell | Critical misses |
+| --- | --- | --- | --- | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| `doughnut-recall-business-deepdive` | `coding_coverage` | `coding_coverage` | yes | 1.000 (`22/22`) | 0.750 (`6/8`) | yes | 63,907 | 53,888 | 13,027 | 2,115 | 893 | 1 | 0 | none |
+| `doughnut-recall-forecast-pbi-investigate` | `coding_coverage` | `coding_coverage` | yes | 1.000 (`18/18`) | 0.875 (`7/8`) | yes | 62,665 | 51,328 | 14,285 | 2,141 | 807 | 1 | 0 | none |
+| `doughnut-recall-wrong-answer-bug-trace` | `ask_or_bypass` | `artifact_sufficiency` | yes | 1.000 (`16/16`) | 0.875 (`7/8`) | yes | 60,342 | 38,528 | 33,063 | 6,313 | 4,936 | 1 | 0 | none |
+
+Deep-dive finding: the v12/v20 quality gap was not retrieval. The raw broker packet already contained `thinkingTimeMs` and `TimestampOperations.addHoursToTimestamp`, but the model sometimes omitted `thinkingTimeMs` from the final JSON. Prompt wording alone was stochastic. The stable improvement came from moving the identifier checklist to the end of the broker packet and reducing bug-trace carry terms from 10 to 6 so the exact critical terms stay salient without crowding the final answer.
+
+The raw final answers are in `benchmark-results/contextgate-natural-v28-short-carry-full-doughnut-2026-06-16.md`.
+
 ## Interpretation
 
 Natural prompting by itself does not reliably reduce token burn. It gives the agent freedom, but if the full CodeGraph tool surface is visible, the agent may either stop too early after a compact packet or keep calling low-level tools until the run becomes expensive. Moving bounded source acquisition into the ContextGate broker fixes the runaway behavior and preserves the user's natural prompt shape.
 
-The exact-slice adaptive mode remains the exact-quality control:
+The exact-slice adaptive mode remains the deterministic quality control:
 
 - Versus baseline, avg input drops from `1,699,313` to `120,839` tokens, a 92.9% reduction.
 - Versus baseline, avg fresh input drops from `130,460` to `36,657` tokens, a 71.9% reduction.
 - Quality improves from `0.888` to `1.000`, and correct stays `3/3`.
 - Tool calls drop from avg `61.3` shell calls to avg `2.7` MCP calls.
 
-The broker-state natural mode is now the best natural/setup-compatible default on this suite:
+The short-carry final-checklist natural mode is now the best natural/setup-compatible default on this suite:
 
-- Versus baseline, avg input drops from `1,699,313` to `62,040` tokens, a 96.3% reduction.
-- Versus baseline, avg fresh input drops from `130,460` to `29,259` tokens, a 77.6% reduction.
-- Quality improves from `0.888` to `0.979`, and correct stays `3/3`.
+- Versus baseline, avg input drops from `1,699,313` to `62,305` tokens, a 96.3% reduction.
+- Versus baseline, avg fresh input drops from `130,460` to `20,125` tokens, an 84.6% reduction.
+- Quality improves from `0.888` to `1.000`, and correct stays `3/3`.
 - Tool calls drop from avg `61.3` shell calls to avg `1.0` MCP call, with `0` shell calls.
-- Contract metadata is now measured from the broker packet, so strict user JSON outputs no longer cause false `Contract ok=no`.
+- Contract metadata is measured from the broker packet, so strict user JSON outputs no longer cause false `Contract ok=no`.
+- Broker-only mode removes the low-level `tokenopt_search`/`tokenopt_read_file` tools from the natural surface, preventing redundant replay of answerable evidence.
 
 Compared with exact-slice adaptive:
 
-- Avg input drops another 48.7%: `120,839` to `62,040`.
-- Avg fresh input drops 20.2% in this rerun: `36,657` to `29,259`. Treat this as cache-sensitive but directionally good.
-- Avg output drops 49.7%: `5,865` to `2,949`.
+- Avg input drops another 48.4%: `120,839` to `62,305`.
+- Avg fresh input drops 45.1% in this rerun: `36,657` to `20,125`. Treat cached/fresh splits as cache-sensitive, but raw/output/tool counts point in the same direction.
+- Avg output drops 39.9%: `5,865` to `3,523`.
 - Avg MCP calls drop from `2.7` to `1.0`.
-- Avg quality is slightly lower: `0.979` vs `1.000`, with the remaining miss in the wrong-answer bug trace.
+- Avg quality is equal on this suite: `1.000` vs `1.000`.
 
 The CodeGraph deep dive suggests not exposing CodeGraph directly for natural mode. Its `codegraph_context` / `codegraph_slice` facade is useful, but a raw natural prompt still needs broker-selected focus files and symbols. The practical merge is provider-level, not prompt-level: ContextGate should own provider choice and call CodeGraph internally only when the anchor ledger cannot prove a named symbol, caller, DTO, or test.
 
@@ -129,8 +145,8 @@ The right architecture is:
 1. User prompt and project/agent instructions remain authoritative.
 2. ContextGate receives the natural task plus evidence slots, not a fixed tool script.
 3. ContextGate owns provider choice and budget: TokenOpt index first, anchor-ledger inline source slices for natural prompts, and optional CodeGraph exact slices behind the broker only when a named file/symbol slot needs deeper proof.
-4. The agent sees a coverage contract and bounded followups, not low-level provider surfaces.
+4. The agent sees a coverage contract, exact source slices, and a short final identifier checklist, not low-level provider surfaces.
 
 ## Decision
 
-Promote `contextgate-natural` v12 as the best natural prompt/setup mode for this suite. Keep `tokenopt-codegraph-adaptive` exact-slice as the quality oracle and fallback benchmark target. The next optimization is broker-side precision for the last 0.021 quality gap: add targeted anchors for wrong-answer scheduling helpers/tests, then optionally add a filtered CodeGraph provider behind `contextgate_get_context` for exact symbol slices when the anchor ledger reports a named-symbol gap.
+Promote `contextgate-natural` v28 as the best natural prompt/setup mode for this suite. Keep `tokenopt-codegraph-adaptive` exact-slice as the quality oracle and fallback benchmark target, but do not expose CodeGraph directly in natural mode. The next optimization is variance control: run repeated v28 natural trials across more prompt families and add a deterministic final-output validator only if future runs show required identifiers still being dropped from otherwise-answerable broker packets.

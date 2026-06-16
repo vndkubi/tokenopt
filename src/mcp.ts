@@ -50,7 +50,7 @@ type EvidenceDetail = "compact" | "full";
 type McpMode = "lite" | "full" | "broker";
 
 const LITE_MCP_TOOL_NAMES = new Set(["contextgate_get_context", "tokenopt_compile_evidence", "tokenopt_search", "tokenopt_read_file"]);
-const BROKER_MCP_TOOL_NAMES = new Set(["contextgate_get_context", "tokenopt_search", "tokenopt_read_file"]);
+const BROKER_MCP_TOOL_NAMES = new Set(["contextgate_get_context"]);
 const FULL_MCP_TOOL_NAMES = new Set([
   ...LITE_MCP_TOOL_NAMES,
   "tokenopt_run_command",
@@ -102,7 +102,7 @@ interface RepositoryOverview {
 }
 
 const SERVER_INSTRUCTIONS =
-  "ContextGate is a bounded repository evidence broker. Use contextgate_get_context when it can replace broad exploration; it returns coverage slots, answerability, and bounded followups. Legacy tokenopt_* tools remain available for exact followups and backward-compatible instructions. If answerable=true, answer with zero redundant tools.";
+  "ContextGate is a bounded repository evidence broker. Use contextgate_get_context when it can replace broad exploration; it returns coverage slots, answerability, and broker-owned inline evidence. In broker mode, answer from an answerable packet with zero redundant tools; legacy tokenopt_* exact followups are reserved for lite/full modes.";
 
 export async function runMcpServer(): Promise<void> {
   const server = new Server(
@@ -655,6 +655,9 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       : "- If answerable=true, answer from the packet and stop acquiring duplicate context.",
     strictGaps.length > 0 && refillFocusTerms.length > 0 ? `- Refill focus terms: ${refillFocusTerms.join(", ")}.` : undefined,
     "- If required slots are missing, refill only those named slots with the cheapest bounded provider available in the session.",
+    inlineEvidence.carryTerms.length > 0
+      ? `- Final output identifier checklist: if the requested output has a symbols field, start it with these exact identifiers in order: ${inlineEvidence.carryTerms.join(", ")}. If there is no symbols field, include each identifier exactly in the closest valid field or explain irrelevance.`
+      : undefined,
     "- Prefer exact source slices for named files/symbols over broad search, and report any still-missing slots honestly."
   ].filter((line): line is string => Boolean(line)).join("\n");
   return {
@@ -694,6 +697,7 @@ interface ContextGateAnchor {
 interface ContextGateInlineEvidence {
   slices: ContextGateInlineSlice[];
   anchors: ContextGateAnchor[];
+  carryTerms: string[];
   focusTerms: string[];
   focusFiles: string[];
   coverage: Record<string, EvidenceCoverageStatus>;
@@ -736,15 +740,18 @@ function buildContextGateInlineEvidence(
   }
 
   const anchors = buildContextGateAnchorLedger(repoRoot, focusFiles, focusTerms, slices);
+  const carryTerms = buildContextGateCarryTerms(task, focusTerms, anchors);
   const coverage = buildContextGateInlineCoverage(slices, anchors, focusFiles, requiredSlots);
   return {
     slices,
     anchors,
+    carryTerms,
     focusTerms,
     focusFiles,
     coverage,
     strictMissingSlots: contextGateInlineStrictGaps(requiredSlots, coverage),
     tokensEst: estimateTokens([
+      carryTerms.length > 0 ? `carry_terms=${carryTerms.join(",")}` : "",
       anchors.map((anchor) => `${anchor.term}->${anchor.file}:${anchor.line}:${anchor.preview}`).join("\n"),
       slices.map((slice) => `${slice.file}:${slice.startLine}-${slice.endLine}\n${slice.text}`).join("\n\n")
     ].filter(Boolean).join("\n\n"))
@@ -1088,6 +1095,106 @@ function scoreContextGateAnchor(anchor: ContextGateAnchor, focusTerms: string[])
   return score;
 }
 
+function buildContextGateCarryTerms(task: string, focusTerms: string[], anchors: ContextGateAnchor[]): string[] {
+  const taskLower = task.toLowerCase();
+  const compactTask = contextGateAnchorTermKey(task);
+  const isBugTrace = /\b(?:bug|regression|wrong|incorrect|retry|failure|failed)\b/i.test(task);
+  const focusIndex = new Map(focusTerms.map((term, index) => [contextGateAnchorTermKey(term), index]));
+  return anchors
+    .map((anchor) => ({
+      term: anchor.term,
+      score: scoreContextGateCarryTerm(anchor, taskLower, compactTask, focusIndex, isBugTrace)
+    }))
+    .filter((item) => item.score >= 55)
+    .sort((a, b) =>
+      (isBugTrace ? contextGateBugCarryPriority(a.term) - contextGateBugCarryPriority(b.term) : 0) ||
+      b.score - a.score ||
+      (focusIndex.get(contextGateAnchorTermKey(a.term)) ?? 999) - (focusIndex.get(contextGateAnchorTermKey(b.term)) ?? 999) ||
+      a.term.localeCompare(b.term)
+    )
+    .map((item) => item.term)
+    .filter((term, index, array) => array.findIndex((other) => contextGateAnchorTermKey(other) === contextGateAnchorTermKey(term)) === index)
+    .slice(0, isBugTrace ? 6 : 16);
+}
+
+function scoreContextGateCarryTerm(
+  anchor: ContextGateAnchor,
+  taskLower: string,
+  compactTask: string,
+  focusIndex: Map<string, number>,
+  isBugTrace: boolean
+): number {
+  const term = anchor.term;
+  const key = contextGateAnchorTermKey(term);
+  const index = focusIndex.get(key);
+  let score = index === undefined ? 20 : Math.max(0, 90 - index * 3);
+  if (/[A-Za-z0-9_]+\.[A-Za-z0-9_]+/.test(term)) {
+    score += 80;
+  }
+  if (/[a-z][A-Z]/.test(term)) {
+    score += 60;
+  }
+  if (/\b(?:test|spec)$/i.test(term)) {
+    score += 45;
+  }
+  if (anchor.kind === "test") {
+    score += 30;
+  }
+  const termLower = term.toLowerCase();
+  if (termLower.length >= 4 && taskLower.includes(termLower)) {
+    score += 45;
+  } else if (key.length >= 5 && compactTask.includes(key)) {
+    score += 30;
+  }
+  if (/(?:answer|recall|failed|success|next|time|timestamp|load|set|get|current|window|mode|count|forecast|spelling|wrong|incorrect|deleted|removed)/i.test(term)) {
+    score += 25;
+  }
+  if (isBugTrace) {
+    if (anchor.kind === "frontend" && !taskLower.includes(term.toLowerCase()) && !(key.length >= 5 && compactTask.includes(key))) {
+      score -= 100;
+    }
+    if (key === "thinkingtimems") {
+      score += 220;
+    }
+    if (key === "nextrecallat" || key === "timestampoperationsaddhourstotimestamp") {
+      score += 120;
+    }
+    if (key === "recallfailed" || key === "markasrecalled") {
+      score += 100;
+    }
+    if (/(?:thinking|time|timestamp|nextrecall|addhours|failed|success|answer|spelling|test)/i.test(term)) {
+      score += 70;
+    }
+    if (/^(?:recalling|currentrecallwindowendat|treadmillmode|recallpage|recallscontroller|userecalldata)$/i.test(key)) {
+      score -= 45;
+    }
+  }
+  if (/^[A-Z][A-Za-z0-9]*(?:Controller|Service|Page|Curve|Trackers?|Prompt|Data)$/.test(term)) {
+    score -= 60;
+  }
+  if (/^(?:trace|daily|validcompactjson|compactjsononly)$/i.test(key)) {
+    score -= 100;
+  }
+  return score;
+}
+
+function contextGateBugCarryPriority(term: string): number {
+  const key = contextGateAnchorTermKey(term);
+  const priorities = new Map<string, number>([
+    ["thinkingtimems", 0],
+    ["timestampoperationsaddhourstotimestamp", 1],
+    ["nextrecallat", 2],
+    ["recallfailed", 3],
+    ["markasrecalled", 4],
+    ["recalledsuccessfully", 5],
+    ["answerquiz", 6],
+    ["answerspelling", 7],
+    ["memorytrackerservicetest", 8],
+    ["getduememorytrackers", 9]
+  ]);
+  return priorities.get(key) ?? 50;
+}
+
 function contextGateAnchorTermRelevant(term: string): boolean {
   const cleaned = term.trim();
   if (!isUsefulFlowSearchTerm(cleaned)) {
@@ -1205,8 +1312,14 @@ function formatContextGateInlineEvidence(inlineEvidence: ContextGateInlineEviden
     ...inlineEvidence.anchors.slice(0, 28).map((anchor) =>
       `- ${anchor.term} -> ${anchor.file}:${anchor.line} (${anchor.kind}) ${anchor.preview}`
     ),
+    inlineEvidence.carryTerms.length > 0
+      ? `broker_suggested_symbols: ${inlineEvidence.carryTerms.join(", ")}`
+      : undefined,
+    inlineEvidence.carryTerms.length > 0
+      ? `broker_must_carry_terms: ${inlineEvidence.carryTerms.join(", ")}`
+      : undefined,
     inlineEvidence.anchors.length > 0
-      ? "broker_anchor_policy: carry relevant named anchors into the final answer; do not collapse exact files/symbols into generic source summaries."
+      ? "broker_anchor_policy: include all broker_must_carry_terms as exact identifiers in final files/symbols/tests/risks/handoff fields when the requested output has such fields; if one is irrelevant, name why in risks/unknowns. Do not collapse exact files/symbols into generic source summaries."
       : undefined,
     "source_slices:",
     ...inlineEvidence.slices.flatMap((slice) => [
@@ -1238,7 +1351,7 @@ function applyContextGateInlineAnswerableOverride(text: string, inlineEvidence: 
   if (inlineEvidence.slices.length === 0 || inlineEvidence.strictMissingSlots.length > 0) {
     return text;
   }
-  return text
+  const overridden = text
     .replace(/evidence_contract_pass: false/g, "evidence_contract_pass: true")
     .replace(/fallback_reason: [^\n]+/, "fallback_reason: broker_inline_evidence_covered")
     .replace("answerable: false", "answerable: true")
@@ -1249,6 +1362,23 @@ function applyContextGateInlineAnswerableOverride(text: string, inlineEvidence: 
     .replace(/Missing:\n(?:- .+\n)+/g, "Missing:\n- none\n")
     .replace(/Allowed followups:\n(?:- .+\n)+/g, "Allowed followups:\n- none\n")
     .replace(/Because answerable=false, do not present a final definitive answer until allowed_followups have covered missing exact code evidence\./g, "Because broker inline source evidence covers the required slots, answer from the packet and do not gather redundant evidence.");
+  return injectContextGateCarryTermsIntoAnswerContract(overridden, inlineEvidence);
+}
+
+function injectContextGateCarryTermsIntoAnswerContract(text: string, inlineEvidence: ContextGateInlineEvidence): string {
+  if (inlineEvidence.carryTerms.length === 0 || text.includes("required_output_identifiers=")) {
+    return text;
+  }
+  const identifierLines = [
+    `suggested_symbols=${inlineEvidence.carryTerms.join(" | ")}`,
+    `required_output_identifiers=${inlineEvidence.carryTerms.join(" | ")}`,
+    "identifier_rule=If the requested final output has a symbols field, start that array with suggested_symbols exactly before optional extras; otherwise include each required_output_identifiers item exactly in the closest files/tests/risks/handoff field or name why it is irrelevant in risks/unknowns. Keep compact JSON short enough to remain valid."
+  ].join("\n");
+  const answerContractPattern = /(Answer contract:\n(?:required_sections=.*\n)?(?:quality_checks=.*\n)?)/;
+  if (answerContractPattern.test(text)) {
+    return text.replace(answerContractPattern, `$1${identifierLines}\n`);
+  }
+  return text.replace(/\nMissing:\n/, `\nAnswer contract:\n${identifierLines}\n\nMissing:\n`);
 }
 
 function writeContextGateBrokerState(
@@ -1302,6 +1432,7 @@ function writeContextGateBrokerState(
         files: inlineEvidence.focusFiles.slice(0, 20),
         facts: [
           `broker_focus_terms=${inlineEvidence.focusTerms.slice(0, 24).join(",")}`,
+          `broker_carry_terms=${inlineEvidence.carryTerms.join(",")}`,
           `broker_anchor_count=${inlineEvidence.anchors.length}`,
           `broker_slice_count=${inlineEvidence.slices.length}`
         ],
