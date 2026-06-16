@@ -482,6 +482,7 @@ Use this mapping in reports:
 | tokenopt-only | `mcp-only` | TokenOpt MCP only, shell disabled. |
 | codegraph-only | `codegraph-only` | CodeGraph MCP only, shell disabled. |
 | tokenopt-codegraph | `tokenopt-codegraph` | TokenOpt + CodeGraph MCP, shell disabled. |
+| tokenopt-codegraph-adaptive | `tokenopt-codegraph-adaptive` | TokenOpt broker policy: review/security/missing-artifact uses TokenOpt-only; flow/implement/refactor uses compact TokenOpt+CodeGraph; shell disabled. |
 | tokenopt-codegraph-hybrid | `tokenopt-codegraph-hybrid` | TokenOpt + CodeGraph, bounded native fallback when CodeGraph fails or evidence slots remain missing. |
 
 Representative suite:
@@ -492,7 +493,7 @@ node dist\cli.js benchmark suite `
   --repo D:\Personal\Projects\hadoop `
   --repo D:\Personal\Projects\elasticsearch `
   --repo D:\Personal\Projects\doughnut `
-  --mode baseline,tokenopt-only,codegraph-only,tokenopt-codegraph,tokenopt-codegraph-hybrid `
+  --mode baseline,tokenopt-only,codegraph-only,tokenopt-codegraph,tokenopt-codegraph-adaptive,tokenopt-codegraph-hybrid `
   --out benchmark-results\developer-daily-playbook-2026-06-14.json `
   --markdown benchmark-results\developer-daily-playbook-2026-06-14.md `
   --raw-dir benchmark-results\raw\developer-daily-playbook-2026-06-14 `

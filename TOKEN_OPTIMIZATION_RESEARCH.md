@@ -4,6 +4,11 @@ Date: 2026-06-16
 
 Scope: daily developer benchmark modes for TokenOpt, CodeGraph, and the combined TokenOpt + CodeGraph hybrid flow.
 
+Implementation status:
+
+- Implemented: `tokenopt-codegraph-adaptive` benchmark mode, task-family routing, compact-first CodeGraph prompt plan, shell-disabled adaptive gate, and detailed raw/fresh token efficiency metrics in suite reports.
+- Not yet implemented: prompt-cache prefix reorder and TokenOpt `hybrid_passport` output profile.
+
 Primary evidence:
 
 - `benchmark-results/developer-daily-playbook-2026-06-14.json`
@@ -226,20 +231,20 @@ Validation: average output tokens <= `6000`, JSON validity remains 100%, quality
 
 ## 9. Implementation Plan
 
-1. Add benchmark policy `tokenopt-codegraph-adaptive`.
-2. Implement task-family routing:
+1. Add benchmark policy `tokenopt-codegraph-adaptive`. Implemented.
+2. Implement task-family routing. Implemented:
    - review -> TokenOpt review packet first
    - write_unittest -> compact CodeGraph change pack plus TokenOpt checklist
    - flow/implement/refactor -> staged hybrid
-3. Reorder `buildSuitePrompt` so stable instructions precede task-specific text.
-4. Add CodeGraph compact-first budgets and explicit escalation budgets.
-5. Add hybrid shell fallback gate based on explicit missing slots or CodeGraph failure.
-6. Add optional `hybrid_passport` profile to TokenOpt evidence packets.
-7. Add benchmark summary columns:
+3. Reorder `buildSuitePrompt` so stable instructions precede task-specific text. Deferred.
+4. Add CodeGraph compact-first budgets and explicit escalation budgets. Implemented for adaptive mode.
+5. Add hybrid shell fallback gate based on explicit missing slots or CodeGraph failure. Implemented for adaptive mode by disabling shell fallback entirely; hybrid mode remains unchanged for comparison.
+6. Add optional `hybrid_passport` profile to TokenOpt evidence packets. Deferred.
+7. Add benchmark summary columns. Implemented:
    - `fresh_tokens`
    - `quality_per_10k_fresh_tokens`
    - `tool_calls_by_family`
-   - `fallback_used`
+   - `fallback_used` via shell/MCP call counts and double-spend metadata
 8. Re-run the 13-prompt suite with:
    - `baseline`
    - `mcp-only`

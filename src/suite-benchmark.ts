@@ -10,6 +10,7 @@ type SuiteBenchmarkMode =
   | "codegraph"
   | "codegraph-only"
   | "tokenopt-codegraph"
+  | "tokenopt-codegraph-adaptive"
   | "tokenopt-codegraph-hybrid"
   | "mcp-first"
   | "mcp-only"
@@ -142,6 +143,19 @@ interface SuiteBenchmarkOptions {
 }
 
 const CODEX_PACKAGE = "@openai/codex@0.137.0";
+const ALL_SUITE_BENCHMARK_MODES: SuiteBenchmarkMode[] = [
+  "baseline",
+  "codegraph",
+  "codegraph-only",
+  "tokenopt-codegraph",
+  "tokenopt-codegraph-adaptive",
+  "tokenopt-codegraph-hybrid",
+  "mcp-first",
+  "mcp-only",
+  "compiled-hard-gate",
+  "router-strict",
+  "router-best"
+];
 
 interface CodeGraphMcpServerConfig {
   command: string;
@@ -262,7 +276,7 @@ function parseOptions(args: string[]): SuiteBenchmarkOptions {
     if (arg === "--mode") {
       const value = requiredValue(args, index, "--mode");
       modes = value === "all"
-        ? ["baseline", "codegraph", "codegraph-only", "tokenopt-codegraph", "tokenopt-codegraph-hybrid", "mcp-first", "mcp-only", "compiled-hard-gate", "router-strict", "router-best"]
+        ? ALL_SUITE_BENCHMARK_MODES
         : value.split(",").map(parseMode);
       index += 1;
       continue;
@@ -469,7 +483,7 @@ function runCodexSuiteBenchmark(
     args.push("-m", options.model);
   }
 
-  if (usesCodeGraph(mode)) {
+  if (usesCodeGraph(mode, task)) {
     const codegraph = buildCodeGraphMcpServerConfig(
       repo,
       inferTaskType(task),
@@ -484,7 +498,7 @@ function runCodexSuiteBenchmark(
       `mcp_servers.codegraph.args=${tomlArray(codegraph.args)}`
     );
   }
-  if (usesTokenOpt(mode)) {
+  if (usesTokenOpt(mode, task)) {
     args.push(
       "-c",
       "mcp_servers.tokenopt.command='node'",
@@ -615,11 +629,71 @@ function codeGraphTaskType(taskType: EvidenceTaskType): string {
   return taskType;
 }
 
-function usesCodeGraph(mode: SuiteBenchmarkMode): boolean {
+function adaptiveCodeGraphBudgetForTask(taskType: EvidenceTaskType): number {
+  if (taskType === "review_diff") {
+    return 4000;
+  }
+  if (taskType === "write_unittest") {
+    return 6000;
+  }
+  if (taskType === "implement") {
+    return 6000;
+  }
+  if (taskType === "api_flow" || taskType === "startup_flow" || taskType === "investigate" || taskType === "field_impact") {
+    return 5000;
+  }
+  return 5000;
+}
+
+interface AdaptiveSuitePlan {
+  useTokenOpt: boolean;
+  useCodeGraph: boolean;
+  disableShell: boolean;
+  strategy: "tokenopt-review" | "tokenopt-bypass" | "tokenopt-codegraph-compact";
+  reason: string;
+}
+
+export function adaptivePlanForSuiteTask(task: Pick<SuiteTask, "id" | "class" | "prompt">): AdaptiveSuitePlan {
+  const taskType = inferTaskType(task);
+  const route = routeTask({ task: task.prompt, requestedTaskType: taskType });
+  if (taskType === "review_diff" || task.class === "code_review" || task.class === "security_audit") {
+    return {
+      useTokenOpt: true,
+      useCodeGraph: false,
+      disableShell: true,
+      strategy: "tokenopt-review",
+      reason: "Review/security tasks use TokenOpt's review evidence contract first; current benchmark shows CodeGraph hybrid is not cost-effective for this family."
+    };
+  }
+  if (route.taskClass === "needs_input_bypass") {
+    return {
+      useTokenOpt: true,
+      useCodeGraph: false,
+      disableShell: true,
+      strategy: "tokenopt-bypass",
+      reason: "The router classified the task as missing a required artifact, so CodeGraph acquisition would be wasted."
+    };
+  }
+  return {
+    useTokenOpt: true,
+    useCodeGraph: true,
+    disableShell: true,
+    strategy: "tokenopt-codegraph-compact",
+    reason: "Use TokenOpt as the slot/quality broker and CodeGraph as the compact evidence provider; shell fallback is disabled."
+  };
+}
+
+function usesCodeGraph(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
+  if (mode === "tokenopt-codegraph-adaptive") {
+    return task ? adaptivePlanForSuiteTask(task).useCodeGraph : true;
+  }
   return mode === "codegraph" || mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-hybrid";
 }
 
-function usesTokenOpt(mode: SuiteBenchmarkMode): boolean {
+function usesTokenOpt(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
+  if (mode === "tokenopt-codegraph-adaptive") {
+    return task ? adaptivePlanForSuiteTask(task).useTokenOpt : true;
+  }
   return mode !== "baseline" && mode !== "codegraph" && mode !== "codegraph-only";
 }
 
@@ -627,7 +701,7 @@ function prewarmCodeGraphIfRequested(
   items: Array<{ repo: string; task: SuiteTask }>,
   options: SuiteBenchmarkOptions
 ): void {
-  if (!options.prewarmCodeGraph || !options.modes.some(usesCodeGraph)) {
+  if (!options.prewarmCodeGraph || !options.modes.some((mode) => items.some((item) => usesCodeGraph(mode, item.task)))) {
     return;
   }
   const repos = unique(items.map((item) => item.repo));
@@ -889,7 +963,7 @@ function tokenOptCodeGraphPlanLines(
   qualityRubricJson: string,
   anchorQuery: string,
   gapRefillQuery: string | undefined,
-  options: { hybridFallback?: boolean } = {}
+  options: { hybridFallback?: boolean; adaptiveCompact?: boolean } = {}
 ): string[] {
   const requiredSlots = taskType === "write_unittest"
     ? "target_behavior, owner_source_files, owner_methods, existing_test_files, missing_coverage, tests_to_add, validation_commands, risks"
@@ -899,17 +973,23 @@ function tokenOptCodeGraphPlanLines(
         ? "scope, owner_flow, files_to_change, symbols, implementation_steps, existing_tests, test_plan, validation_commands, compatibility_risks"
         : "entrypoint_or_owner, flow, source_files, symbols, existing_tests, implementation_ideas, validation_commands, risks";
   const codeGraphFirst = taskType === "write_unittest"
-    ? `get_change_pack(task=<original Daily task only>, changeType=test, tokenBudget=${Math.min(codeGraphBudget, 8000)}, maxFiles=12, maxSymbols=30, includeTests=true, includeSnippets=false, profile=compact)`
+    ? `get_change_pack(task=<original Daily task only>, changeType=test, tokenBudget=${Math.min(codeGraphBudget, options.adaptiveCompact ? 6000 : 8000)}, maxFiles=${options.adaptiveCompact ? 8 : 12}, maxSymbols=${options.adaptiveCompact ? 20 : 30}, includeTests=true, includeSnippets=false, profile=compact)`
     : taskType === "review_diff"
       ? "review_patch(diff/task=<original Daily task/diff only>, outputMode=balanced, includeLikelyTests=true, maxFindings=20, maxEvidencePerFinding=10, limit=100)"
       : taskType === "implement"
-        ? `get_change_pack(task=<original Daily task only>, changeType=implement, tokenBudget=${codeGraphBudget}, maxFiles=20, maxSymbols=50, includeTests=true, includeSnippets=false, profile=full)`
-        : `get_flow_pack(target=<original Daily task only>, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${codeGraphBudget}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=5000, profile=full)`;
+        ? `get_change_pack(task=<original Daily task only>, changeType=implement, tokenBudget=${codeGraphBudget}, maxFiles=${options.adaptiveCompact ? 12 : 20}, maxSymbols=${options.adaptiveCompact ? 30 : 50}, includeTests=true, includeSnippets=false, profile=${options.adaptiveCompact ? "compact" : "full"})`
+        : options.adaptiveCompact
+          ? `get_flow_pack(target=<original Daily task only>, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${codeGraphBudget}, responseMode=answer, includeTests=true, includeSnippets=false, snippetTokenBudget=1200, profile=compact)`
+          : `get_flow_pack(target=<original Daily task only>, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${codeGraphBudget}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=5000, profile=full)`;
   const followup = taskType === "write_unittest"
     ? `Then make one exact search_symbol call with query=${JSON.stringify(anchorQuery)}, includeTests=true, includeSnippets=false, limit=60. This composite query intentionally covers behavior, owner symbols, state fields, and likely existing tests; do not replace it with a single identifier search.`
-    : "If one required slot is weak, make one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named missing slot.";
-  const fallbackRegex = buildCodeGraphFallbackRegex(anchorQuery);
-  const evidenceBudgetLine = options.hybridFallback
+    : options.adaptiveCompact
+      ? "If one required slot is missing, make at most one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named slot. Do not follow up for merely nice-to-have detail."
+      : "If one required slot is weak, make one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named missing slot.";
+  const fallbackRegex = options.hybridFallback ? buildCodeGraphFallbackRegex(anchorQuery) : undefined;
+  const evidenceBudgetLine = options.adaptiveCompact
+    ? "- Adaptive budget: at most 3 MCP calls total: 1 TokenOpt passport call, 1 compact CodeGraph pack, and at most 1 exact CodeGraph followup for a named missing required slot. Shell fallback is disabled."
+    : options.hybridFallback
     ? gapRefillQuery
       ? "- Budget before fallback: at most 4 MCP calls total: 1 TokenOpt passport call plus exactly 3 CodeGraph evidence calls."
       : "- Budget before fallback: at most 3 MCP calls total: 1 TokenOpt passport call plus at most 2 CodeGraph evidence calls."
@@ -928,7 +1008,9 @@ function tokenOptCodeGraphPlanLines(
     ]
     : [];
   return [
-    "- Use TokenOpt as the quality passport and CodeGraph as the evidence provider.",
+    options.adaptiveCompact
+      ? "- Use TokenOpt as the single quality broker and CodeGraph as its compact evidence provider."
+      : "- Use TokenOpt as the quality passport and CodeGraph as the evidence provider.",
     `- First call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, budget_tokens=${tokenOptBudget}, quality_rubric=${qualityRubricJson}, and task set to only the original Daily task text above.`,
     `- Treat the TokenOpt packet as a slot checklist, not as sufficient final evidence. Required slots: ${requiredSlots}.`,
     "- When calling any MCP tool, pass only the original Daily task/diff text, never this Benchmark constraints section or tool instructions.",
@@ -937,11 +1019,13 @@ function tokenOptCodeGraphPlanLines(
     taskType === "write_unittest"
       ? "- For write_unittest synthesis, scan the entire returned symbols array and prioritize unique test_source/frameworkRole=test:test hits over broad testsLikelyRelevant entries. Carry matching test files and exact owner symbols into existing_coverage, files, and symbols."
       : "- Carry exact CodeGraph evidence into the final answer.",
-    ...gapRefillPlanLines(gapRefillQuery),
+    ...(options.adaptiveCompact ? [] : gapRefillPlanLines(gapRefillQuery)),
     evidenceBudgetLine,
     ...fallbackLines,
     "- Final ideas/proposals/tests must be evidence-grounded: each concrete idea should name relevant files or symbols, explain business/behavior value, include validation/tests, and state risks/tradeoffs.",
-    "- Final output must be a syntactically valid compact single JSON object under 7000 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects.",
+    options.adaptiveCompact
+      ? "- Final output must be a syntactically valid compact single JSON object under 5500 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects."
+      : "- Final output must be a syntactically valid compact single JSON object under 7000 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects.",
     "- Compact limits: max 5 existing_coverage items, max 12 files, max 16 symbols, max 5 tests_to_add, max 5 risks. Preserve all requested top-level keys exactly.",
     "- If a slot remains missing, do not invent it; include it as a risk or missing_coverage item in the requested JSON shape."
   ];
@@ -978,6 +1062,33 @@ function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMod
       ...common,
       ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, codeGraphBudgetTokens, codeGraphRubric, anchorQuery, gapRefillQuery, {
         hybridFallback: mode === "tokenopt-codegraph-hybrid"
+      }),
+      "- Preserve the requested JSON contract exactly."
+    ].join("\n");
+  }
+
+  if (mode === "tokenopt-codegraph-adaptive") {
+    const adaptivePlan = adaptivePlanForSuiteTask(task);
+    if (!adaptivePlan.useCodeGraph) {
+      return [
+        ...common,
+        `- Adaptive policy: ${adaptivePlan.strategy}. ${adaptivePlan.reason}`,
+        "- Use TokenOpt as the single evidence broker. Do not call CodeGraph for this task family.",
+        `- Call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, and budget_tokens around ${packetTokens}.`,
+        taskType === "review_diff"
+          ? "- Pass task as the complete user request above including the full inline unified diff when present; do not summarize or omit the diff."
+          : "- Pass task as the complete original Daily task text above.",
+        "- If answerable=true, answer from the packet with zero additional tool calls.",
+        "- If answerable=false, use at most one exact TokenOpt search/read followup named by the packet for a missing changed method, source file, or test.",
+        "- Shell/read fallback and CodeGraph fallback are disabled in adaptive mode for this task family.",
+        "- Final output must be a syntactically valid compact single JSON object under 5000 characters. Preserve the requested JSON contract exactly."
+      ].join("\n");
+    }
+    return [
+      ...common,
+      `- Adaptive policy: ${adaptivePlan.strategy}. ${adaptivePlan.reason}`,
+      ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, adaptiveCodeGraphBudgetForTask(taskType), codeGraphRubric, anchorQuery, undefined, {
+        adaptiveCompact: true
       }),
       "- Preserve the requested JSON contract exactly."
     ].join("\n");
@@ -1097,7 +1208,7 @@ function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMod
   ].join("\n");
 }
 
-function inferTaskType(task: SuiteTask): EvidenceTaskType {
+function inferTaskType(task: Pick<SuiteTask, "id" | "class" | "prompt">): EvidenceTaskType {
   const idAndClass = `${task.id} ${task.class}`.toLowerCase();
   const text = `${idAndClass} ${task.prompt}`.toLowerCase();
   if (idAndClass.includes("field") || idAndClass.includes("impact")) {
@@ -1489,6 +1600,9 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     "Cached",
     "Output tok",
     "Reason tok",
+    "Raw tok",
+    "Fresh tok",
+    "Q/10k fresh",
     "Duration ms"
   ];
   const body = rows.map((row) => [
@@ -1516,6 +1630,9 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     String(row.usage.cached_input_tokens),
     String(row.usage.output_tokens),
     String(row.usage.reasoning_output_tokens),
+    String(rawUsageTokens(row.usage)),
+    String(freshUsageTokens(row.usage)),
+    qualityPer10kFresh(row).toFixed(3),
     String(row.durationMs)
   ]);
   const table = [header, ...body];
@@ -1556,7 +1673,7 @@ function formatMarkdownReport(
     "## Aggregate",
     "",
     formatMarkdownTable(
-      ["Mode", "Runs", "Correct", "Idea ok", "Median input tok", "Avg input tok", "Avg quality", "Avg idea", "Avg critical miss"],
+      ["Mode", "Runs", "Correct", "Idea ok", "Median input tok", "Avg input tok", "Avg output tok", "Avg raw tok", "Avg fresh tok", "Avg quality", "Avg idea", "Avg Q/10k fresh", "Avg critical miss", "Avg MCP", "Avg shell"],
       aggregateRows(rows)
     ),
     "",
@@ -1572,8 +1689,11 @@ function formatMarkdownReport(
         "Median input tok",
         "Avg input tok",
         "Avg output tok",
+        "Avg raw tok",
+        "Avg fresh tok",
         "Avg quality",
         "Avg idea",
+        "Avg Q/10k fresh",
         "Avg critical miss",
         "Avg MCP",
         "Avg shell",
@@ -1663,8 +1783,13 @@ function summaryHeader(): string[] {
     "Critical",
     "JSON",
     "Input tok",
+    "Cached tok",
     "Delta vs baseline",
     "Output tok",
+    "Reason tok",
+    "Raw tok",
+    "Fresh tok",
+    "Q/10k fresh",
     "Tool",
     "MCP",
     "Shell",
@@ -1692,8 +1817,13 @@ function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string
     String(row.criticalMisses.length),
     row.jsonValid ? "yes" : "no",
     String(row.usage.input_tokens),
+    String(row.usage.cached_input_tokens),
     delta,
     String(row.usage.output_tokens),
+    String(row.usage.reasoning_output_tokens),
+    String(rawUsageTokens(row.usage)),
+    String(freshUsageTokens(row.usage)),
+    qualityPer10kFresh(row).toFixed(3),
     String(row.toolCalls),
     String(row.mcpCalls),
     String(row.shellCalls),
@@ -1713,9 +1843,15 @@ function aggregateRows(rows: SuiteBenchmarkRow[]): string[][] {
       `${modeRows.filter((row) => row.ideaPassed).length}/${modeRows.length}`,
       String(median(modeRows.map((row) => row.usage.input_tokens))),
       average(modeRows.map((row) => row.usage.input_tokens)).toFixed(0),
+      average(modeRows.map((row) => row.usage.output_tokens)).toFixed(0),
+      average(modeRows.map((row) => rawUsageTokens(row.usage))).toFixed(0),
+      average(modeRows.map((row) => freshUsageTokens(row.usage))).toFixed(0),
       average(modeRows.map((row) => row.qualityScore)).toFixed(3),
       average(modeRows.map((row) => row.ideaScore)).toFixed(3),
-      average(modeRows.map((row) => row.criticalMisses.length)).toFixed(2)
+      average(modeRows.map(qualityPer10kFresh)).toFixed(3),
+      average(modeRows.map((row) => row.criticalMisses.length)).toFixed(2),
+      average(modeRows.map((row) => row.mcpCalls)).toFixed(1),
+      average(modeRows.map((row) => row.shellCalls)).toFixed(1)
     ];
   });
 }
@@ -1739,8 +1875,11 @@ function promptFamilyAggregateRows(rows: SuiteBenchmarkRow[]): string[][] {
         String(median(familyRows.map((row) => row.usage.input_tokens))),
         average(familyRows.map((row) => row.usage.input_tokens)).toFixed(0),
         average(familyRows.map((row) => row.usage.output_tokens)).toFixed(0),
+        average(familyRows.map((row) => rawUsageTokens(row.usage))).toFixed(0),
+        average(familyRows.map((row) => freshUsageTokens(row.usage))).toFixed(0),
         average(familyRows.map((row) => row.qualityScore)).toFixed(3),
         average(familyRows.map((row) => row.ideaScore)).toFixed(3),
+        average(familyRows.map(qualityPer10kFresh)).toFixed(3),
         average(familyRows.map((row) => row.criticalMisses.length)).toFixed(2),
         average(familyRows.map((row) => row.mcpCalls)).toFixed(1),
         average(familyRows.map((row) => row.shellCalls)).toFixed(1),
@@ -1822,6 +1961,7 @@ function parseMode(value: string): SuiteBenchmarkMode {
     value === "codegraph" ||
     value === "codegraph-only" ||
     value === "tokenopt-codegraph" ||
+    value === "tokenopt-codegraph-adaptive" ||
     value === "tokenopt-codegraph-hybrid" ||
     value === "mcp-first" ||
     value === "mcp-only" ||
@@ -1839,6 +1979,9 @@ function parseMode(value: string): SuiteBenchmarkMode {
   }
   if (value === "tokenopt+codegraph" || value === "combined") {
     return "tokenopt-codegraph";
+  }
+  if (value === "tokenopt+codegraph-adaptive" || value === "adaptive" || value === "combined-adaptive") {
+    return "tokenopt-codegraph-adaptive";
   }
   if (value === "tokenopt+codegraph-hybrid" || value === "combined-hybrid" || value === "hybrid-codegraph") {
     return "tokenopt-codegraph-hybrid";
@@ -1958,6 +2101,19 @@ function fenced(text: string, language = ""): string {
   return `${fence}${language}\n${text}\n${fence}`;
 }
 
+function rawUsageTokens(usage: CodexUsage): number {
+  return usage.input_tokens + usage.output_tokens + usage.reasoning_output_tokens;
+}
+
+function freshUsageTokens(usage: CodexUsage): number {
+  return Math.max(0, usage.input_tokens - usage.cached_input_tokens) + usage.output_tokens + usage.reasoning_output_tokens;
+}
+
+function qualityPer10kFresh(row: SuiteBenchmarkRow): number {
+  const fresh = freshUsageTokens(row.usage);
+  return fresh > 0 ? row.qualityScore / (fresh / 10_000) : 0;
+}
+
 function median(values: number[]): number {
   if (values.length === 0) {
     return 0;
@@ -2015,7 +2171,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function suiteBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|codegraph|codegraph-only|tokenopt-codegraph|tokenopt-codegraph-hybrid|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--prewarm-codegraph] [--json] [--show-answers]
+  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|codegraph|codegraph-only|tokenopt-codegraph|tokenopt-codegraph-adaptive|tokenopt-codegraph-hybrid|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--prewarm-codegraph] [--json] [--show-answers]
 
 Notes:
   - Tasks are matched by suite task.project against the repo directory name.
@@ -2024,6 +2180,7 @@ Notes:
   - Without env overrides, codegraph mode auto-detects sibling ../code-graph/dist/cli.js before falling back to codegraph on PATH.
   - codegraph-only injects CodeGraph MCP and disables shell_tool.
   - tokenopt-codegraph injects TokenOpt and CodeGraph MCP, disables shell_tool, and measures evidence-grounded idea quality.
+  - tokenopt-codegraph-adaptive uses one evidence-broker policy: TokenOpt-only for review/security/missing-artifact tasks, compact TokenOpt+CodeGraph for flow/implement/refactor tasks, and disables shell_tool.
   - tokenopt-codegraph-hybrid injects TokenOpt and CodeGraph MCP, then allows a bounded exact rg/slice fallback only when CodeGraph is unavailable or missing required slots.
   - --prewarm-codegraph runs codegraph index once per selected repo before Codex runs and adds --no-prewarm to per-run MCP servers.
   - mcp-first injects TokenOpt MCP and allows shell fallback only after exact TokenOpt followups.
@@ -2034,6 +2191,9 @@ Notes:
 }
 
 function shouldDisableShell(mode: SuiteBenchmarkMode, task: SuiteTask): boolean {
+  if (mode === "tokenopt-codegraph-adaptive") {
+    return adaptivePlanForSuiteTask(task).disableShell;
+  }
   if (mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "mcp-only" || mode === "compiled-hard-gate" || mode === "router-strict") {
     return true;
   }

@@ -182,6 +182,8 @@ node dist/cli.js benchmark suite --suite examples/contextgate-37-prompt-suite.ex
 
 Quality is scored by deterministic rubric checks against the generated benchmark answer. This measures the acquisition layer and answer-readiness directly. It does not replace a full model E2E judge; use it to verify whether TokenOpt reduces evidence replay before running agent-level A/B tests.
 
+For daily TokenOpt + CodeGraph comparisons, `tokenopt-codegraph-adaptive` routes review/security/missing-artifact tasks through TokenOpt-only and uses compact TokenOpt+CodeGraph with shell disabled for flow, implementation, and refactor tasks. Suite reports include raw total tokens, fresh tokens, and quality per 10k fresh tokens.
+
 For agent-level measurement through the real Codex CLI:
 
 ```bash

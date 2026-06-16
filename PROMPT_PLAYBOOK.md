@@ -189,7 +189,7 @@ Recommended default:
 
 | Daily use case | Best first route | Why | Avoid |
 | --- | --- | --- | --- |
-| Broad investigate / unknown owner | TokenOpt+CodeGraph when CodeGraph is ready; `tokenopt-codegraph-hybrid` otherwise | TokenOpt supplies the quality slots; CodeGraph supplies file/symbol/test evidence; hybrid preserves quality when CodeGraph is unhealthy | TokenOpt packet plus repo-wide shell fallback |
+| Broad investigate / unknown owner | `tokenopt-codegraph-adaptive` when CodeGraph is ready; `tokenopt-codegraph-hybrid` only for resilience tests | TokenOpt supplies the quality slots; CodeGraph supplies compact file/symbol/test evidence; adaptive disables shell fallback to avoid double spend | TokenOpt packet plus repo-wide shell fallback |
 | Exact flow trace with known endpoint/class/symbol | CodeGraph-only or native narrow search/read | Needs concrete path proof, not broad summaries | Broad TokenOpt first when exact target is already named |
 | E2E trace flow | CodeGraph-only or TokenOpt+CodeGraph | Needs ordered flow edges, tests, and inferred-edge marking | Candidate-file lists presented as definitive flow proof |
 | Investigate PBI | TokenOpt+CodeGraph or hybrid fallback when CodeGraph is not ready | Requirement needs business slots, impacted files, unknowns, risks, and validation | Planning from generic business text without code anchors |

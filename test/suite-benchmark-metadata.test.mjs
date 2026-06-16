@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  adaptivePlanForSuiteTask,
   buildCodeGraphAnchorQueryForTask,
   buildCodeGraphFallbackRegex,
   buildCodeGraphGapRefillQueryForTask,
@@ -11,6 +12,32 @@ import {
   buildSuiteRouteMetadata,
   scoreSuiteIdeaQuality
 } from "../dist/suite-benchmark.js";
+
+test("adaptive suite policy avoids CodeGraph for review tasks", () => {
+  const plan = adaptivePlanForSuiteTask({
+    id: "sample-code-review",
+    class: "code_review",
+    prompt: "Review this diff and return JSON findings."
+  });
+
+  assert.equal(plan.strategy, "tokenopt-review");
+  assert.equal(plan.useTokenOpt, true);
+  assert.equal(plan.useCodeGraph, false);
+  assert.equal(plan.disableShell, true);
+});
+
+test("adaptive suite policy uses compact CodeGraph for flow tasks", () => {
+  const plan = adaptivePlanForSuiteTask({
+    id: "sample-investigate-flow",
+    class: "investigate_flow",
+    prompt: "Investigate GET /api/recalls flow and return JSON with files, symbols, tests, risks."
+  });
+
+  assert.equal(plan.strategy, "tokenopt-codegraph-compact");
+  assert.equal(plan.useTokenOpt, true);
+  assert.equal(plan.useCodeGraph, true);
+  assert.equal(plan.disableShell, true);
+});
 
 test("suite benchmark metadata reports acquisition mode and contract", () => {
   const metadata = buildSuiteRouteMetadata(

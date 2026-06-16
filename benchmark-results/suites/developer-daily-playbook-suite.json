@@ -1,7 +1,7 @@
 {
   "name": "Developer Daily Playbook Suite",
   "version": "2026-06-14",
-  "purpose": "Compare baseline, TokenOpt-only, CodeGraph-only, and TokenOpt+CodeGraph hybrid on representative daily developer prompts: business deepdive, investigate-flow, pbi-plan, write-unittest-class, requirement-analysis, investigate-pbi, e2e-trace-flow, bug-trace, performance-analysis, security-audit, review-code, implement handoff, and refactor-code.",
+  "purpose": "Compare baseline, TokenOpt-only, CodeGraph-only, TokenOpt+CodeGraph adaptive, and TokenOpt+CodeGraph hybrid on representative daily developer prompts: business deepdive, investigate-flow, pbi-plan, write-unittest-class, requirement-analysis, investigate-pbi, e2e-trace-flow, bug-trace, performance-analysis, security-audit, review-code, implement handoff, and refactor-code.",
   "tasks": [
     {
       "id": "doughnut-recall-business-deepdive",
