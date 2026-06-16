@@ -47,6 +47,7 @@ default_tools_approval_mode = "approve"
 Lite mode exposes:
 
 ```text
+contextgate_get_context
 tokenopt_compile_evidence
 tokenopt_search
 tokenopt_read_file
@@ -140,7 +141,7 @@ Benchmark constraints:
 - Preserve the requested output format exactly.
 - Repository root: D:\Personal\Projects\doughnut
 - TokenOpt router selected strict acquisition for this task.
-- Call tokenopt_compile_evidence with cwd=...
+- Call contextgate_get_context with cwd=...
 ```
 
 Reusable production prompt:
@@ -148,7 +149,7 @@ Reusable production prompt:
 ```text
 Choose the cheapest evidence path first.
 
-Use TokenOpt MCP as a cost gate if this can replace broad exploration.
+Use ContextGate as an evidence broker if this can replace broad exploration.
 If answerable=true, answer from the packet and do not call shell/search again.
 
 Task:

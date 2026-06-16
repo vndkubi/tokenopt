@@ -10,6 +10,7 @@ import {
   buildCodeGraphFallbackRegex,
   buildCodeGraphGapRefillQueryForTask,
   buildCodeGraphMcpServerConfig,
+  buildSuitePrompt,
   buildSuiteRouteMetadata,
   scoreSuiteIdeaQuality
 } from "../dist/suite-benchmark.js";
@@ -79,6 +80,33 @@ test("adaptive quality slice plan uses exact Doughnut recall evidence slices", (
   assert.ok(plan.slices.some((slice) => slice.file === "frontend/src/composables/useRecallData.ts"));
   assert.ok(plan.requiredAnchors.includes("loadCurrentDueRecalls"));
   assert.ok(plan.requiredAnchors.includes("treadmillMode"));
+});
+
+test("contextgate natural prompt uses evidence contract instead of fixed tool calls", () => {
+  const prompt = buildSuitePrompt(
+    "D:\\Personal\\Projects\\doughnut",
+    {
+      id: "doughnut-recall-business-deepdive",
+      project: "doughnut",
+      class: "business_deepdive",
+      winnerHypothesis: "",
+      prompt: "Daily task: business deepdive the learner recall experience. Return valid compact JSON only with keys: summary, files, symbols, risks.",
+      expectedEvidence: { files: [], symbols: [], terms: [] },
+      qualityRubric: ["Ground the answer in source and test evidence."],
+      gateAssertions: [],
+      maxBudget: { packetTokens: 1800 }
+    },
+    "contextgate-natural"
+  );
+
+  assert.match(prompt, /Daily task: business deepdive/);
+  assert.match(prompt, /Evidence slots to satisfy/);
+  assert.match(prompt, /context broker/i);
+  assert.match(prompt, /Keep the user's prompt, project instructions, and agent instructions authoritative/);
+  assert.doesNotMatch(prompt, /tokenopt_compile_evidence/);
+  assert.doesNotMatch(prompt, /get_file_slice/);
+  assert.doesNotMatch(prompt, /TokenOpt/);
+  assert.doesNotMatch(prompt, /CodeGraph/);
 });
 
 test("suite benchmark metadata reports acquisition mode and contract", () => {

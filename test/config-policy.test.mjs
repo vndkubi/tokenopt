@@ -100,8 +100,8 @@ test("user prompt injects TokenOpt MCP routing guidance for natural tasks", () =
     { repoRoot: process.cwd() }
   );
   assert.equal(decision.action, "context");
-  assert.match(decision.additionalContext, /tokenopt_compile_evidence/);
-  assert.match(decision.additionalContext, /cost gate/);
+  assert.match(decision.additionalContext, /contextgate_get_context/);
+  assert.match(decision.additionalContext, /evidence broker/);
   assert.match(decision.additionalContext, /MCP\+shell double-spend/);
 });
 

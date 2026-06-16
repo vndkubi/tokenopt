@@ -38,7 +38,7 @@ export const DEFAULT_CONFIG: TokenOptConfig = {
   context: {
     enableSecretBlock: true,
     userPromptGuidance:
-      "TokenOpt is active as a cost gate, not a mandatory extra step. Use tokenopt_compile_evidence first only when it can replace broad exploration, such as build handoff, repo overview, business/domain summary, implementation planning, or unit-test planning. In shell-enabled hybrid sessions, do not call TokenOpt first for exact code-flow/class/PBI deep dives if you will still need normal shell/search reads; use native narrow search/read directly or run strict MCP-only mode instead. If a TokenOpt packet is answerable, answer from it with zero redundant exploration; if it is not answerable, use only its bounded followups and avoid MCP+shell double-spend."
+      "ContextGate is active as an evidence broker, not a mandatory extra step. For broad repo evidence, business/domain research, implementation planning, or unit-test planning, use contextgate_get_context when it can replace raw exploration. Treat the packet as a coverage contract: if answerable=true, answer from it with zero redundant exploration; if slots are missing, refill only those named slots with bounded context/search/read followups. For exact known-file edits, narrow direct reads are acceptable. Avoid MCP+shell double-spend."
   },
   paths: {},
   codex: {

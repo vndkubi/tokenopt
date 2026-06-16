@@ -172,6 +172,7 @@ Add:
       "args": ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"],
       "env": {},
       "tools": [
+        "contextgate_get_context",
         "tokenopt_compile_evidence",
         "tokenopt_search",
         "tokenopt_read_file"
@@ -206,12 +207,12 @@ AGENTS.md
 
 The installed block tells Copilot:
 
-- Use TokenOpt as a cost gate; call `tokenopt_compile_evidence` first only when it can replace broad exploration.
-- Use the right task type, such as `build_handoff`, `investigate`, `research_business`, `implement`, or `write_unittest`.
+- Use ContextGate as an evidence broker only when it can replace broad exploration.
+- Call `contextgate_get_context` with the natural task, task type, required slots, budget, and quality rubric; keep `tokenopt_compile_evidence` as legacy/debug fallback.
 - If `answerable=true`, answer from the packet and do not run more shell/search calls.
-- If `missing` is non-empty, use only `allowed_followups` in strict MCP-only mode. In normal shell-enabled sessions, avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
+- If slots are missing, refill only those named slots. In normal shell-enabled sessions, avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
 
-The user does not need to mention `tokenopt_compile_evidence` in normal prompts. After setup, prompts such as:
+The user does not need to mention `contextgate_get_context` or `tokenopt_compile_evidence` in normal prompts. After setup, prompts such as:
 
 ```text
 Investigate checkout flow failure

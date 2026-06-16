@@ -61,14 +61,14 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
   if (target === "copilot-agent") {
     return [
       "---",
-      "name: tokenopt-cost-gate",
-      "description: Use for broad repository handoff, business/domain research, implementation planning, and unit-test planning tasks where TokenOpt MCP can replace broad exploration.",
-      "tools: [\"tokenopt/tokenopt_compile_evidence\", \"tokenopt/tokenopt_search\", \"tokenopt/tokenopt_read_file\", \"search\", \"read\"]",
+      "name: contextgate-cost-gate",
+      "description: Use for broad repository handoff, business/domain research, implementation planning, and unit-test planning tasks where a bounded context broker can replace broad exploration.",
+      "tools: [\"tokenopt/contextgate_get_context\", \"tokenopt/tokenopt_compile_evidence\", \"tokenopt/tokenopt_search\", \"tokenopt/tokenopt_read_file\", \"search\", \"read\"]",
       "---",
       "",
-      "# TokenOpt Cost Gate Agent",
+      "# ContextGate Cost Gate Agent",
       "",
-      "Use TokenOpt MCP as a cost gate for broad repo tasks. Do not treat it as a mandatory extra step.",
+      "Use ContextGate as a coverage-contract broker for broad repo tasks. Do not treat it as a mandatory extra step.",
       "",
       "Natural prompts that should trigger TokenOpt first:",
       "",
@@ -85,21 +85,21 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
       "Workflow:",
       "",
       "```text",
-      "1. Call tokenopt_compile_evidence with the user's task, inferred task_type, cwd, budget_tokens around 1200, and a concrete quality_rubric.",
+      "1. Call contextgate_get_context with the user's natural task, inferred task_type, cwd, required_slots, budget_tokens around 1200, and a concrete quality_rubric.",
       "2. If answerable=true, answer from the packet with zero redundant search/read.",
       "3. If answerable=false, use only tokenopt_search/tokenopt_read_file followups from the packet.",
-      "4. If the task is an exact code-flow/class/PBI deep dive that will need line-level proof, report that TokenOpt is not the cheapest first step and use normal narrow search/read outside this agent.",
+      "4. If the task is an exact known-file edit that already names the source location, use normal narrow search/read outside this agent.",
       "```"
     ].join("\n");
   }
   const heading =
     target === "copilot"
-      ? "# TokenOpt MCP Usage"
-      : "## TokenOpt MCP Usage";
+      ? "# ContextGate MCP Usage"
+      : "## ContextGate MCP Usage";
   return [
     heading,
     "",
-    "When the TokenOpt MCP server is available, treat it as a cost gate, not a mandatory extra step before normal tools.",
+    "When the TokenOpt MCP server is available, treat ContextGate as an evidence broker, not a mandatory extra step before normal tools.",
     "",
     "Use TokenOpt first only when it can replace broad exploration:",
     "",
@@ -135,9 +135,10 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
     "Required first step:",
     "",
     "```text",
-    "When the cost gate says TokenOpt is appropriate, call tokenopt_compile_evidence with:",
+    "When the task needs broad repo evidence, call contextgate_get_context with:",
     "- task: the user's task",
     "- task_type: one of build_handoff, investigate, research_business, implement, write_unittest, api_flow, field_impact, review_diff, startup_flow, unknown",
+    "- required_slots: evidence slots the answer must cover, such as source_files, symbols, tests, risks, backend_entrypoint, frontend_state",
     "- cwd: the current repository root",
     "- budget_tokens: 1200-2000",
     "- quality_rubric: 3-6 concrete checks the final answer must satisfy",
@@ -160,10 +161,10 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
     "Tool policy:",
     "",
     "```text",
-    "Prefer tokenopt_compile_evidence over broad raw shell exploration only when it replaces that exploration.",
+    "Prefer contextgate_get_context over broad raw shell exploration only when it replaces that exploration.",
     "Use tokenopt_search only for exact patterns and narrow paths.",
     "Use tokenopt_read_file only for bounded slices around exact matches.",
-    "Default lite mode exposes only compile_evidence, search, and read_file to reduce MCP schema/context overhead.",
+    "Default lite mode exposes contextgate_get_context plus legacy compile_evidence, search, and read_file to reduce MCP schema/context overhead.",
     "Use tokenopt_run_command for builds/tests only when that tool is visible/full mode is explicitly enabled.",
     "Do not bypass TokenOpt with shell fallback after an answerable packet.",
     "Do not do MCP-first plus shell fallback for exact code-flow/class/PBI tasks; that is expected to increase input tokens.",

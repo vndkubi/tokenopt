@@ -349,17 +349,17 @@ function parseCopilotSetupOptions(args: string[]): {
   return { scope, installAgents, installPrompts, tokenoptCliPath, includeRunCommand };
 }
 
-function parseMcpMode(args: string[]): "lite" | "full" | undefined {
+function parseMcpMode(args: string[]): "lite" | "full" | "broker" | undefined {
   if (args.length === 0) {
     return undefined;
   }
   const modeIndex = args.indexOf("--mode");
   if (modeIndex < 0) {
-    throw new Error("Usage: tokenopt mcp [--mode lite|full]");
+    throw new Error("Usage: tokenopt mcp [--mode lite|full|broker]");
   }
   const mode = args[modeIndex + 1];
-  if (mode !== "lite" && mode !== "full") {
-    throw new Error("--mode must be lite or full");
+  if (mode !== "lite" && mode !== "full" && mode !== "broker") {
+    throw new Error("--mode must be lite, full, or broker");
   }
   return mode;
 }

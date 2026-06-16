@@ -45,9 +45,10 @@ import type {
 
 type SearchProvider = "rg" | "git" | "node";
 type EvidenceDetail = "compact" | "full";
-type McpMode = "lite" | "full";
+type McpMode = "lite" | "full" | "broker";
 
-const LITE_MCP_TOOL_NAMES = new Set(["tokenopt_compile_evidence", "tokenopt_search", "tokenopt_read_file"]);
+const LITE_MCP_TOOL_NAMES = new Set(["contextgate_get_context", "tokenopt_compile_evidence", "tokenopt_search", "tokenopt_read_file"]);
+const BROKER_MCP_TOOL_NAMES = new Set(["contextgate_get_context", "tokenopt_search", "tokenopt_read_file"]);
 const FULL_MCP_TOOL_NAMES = new Set([
   ...LITE_MCP_TOOL_NAMES,
   "tokenopt_run_command",
@@ -99,7 +100,7 @@ interface RepositoryOverview {
 }
 
 const SERVER_INSTRUCTIONS =
-  "TokenOpt is a cost gate. Use compile_evidence when it replaces broad exploration; for review_diff pass the complete user request including the full unified diff in task. Skip MCP-first for exact code-flow/class/PBI tasks if shell/search will still be needed. If answerable=true, answer with zero redundant tools.";
+  "ContextGate is a bounded repository evidence broker. Use contextgate_get_context when it can replace broad exploration; it returns coverage slots, answerability, and bounded followups. Legacy tokenopt_* tools remain available for exact followups and backward-compatible instructions. If answerable=true, answer with zero redundant tools.";
 
 export async function runMcpServer(): Promise<void> {
   const server = new Server(
@@ -118,6 +119,66 @@ export async function runMcpServer(): Promise<void> {
   const mcpMode = normalizeMcpMode();
   const exposedToolNames = getExposedMcpToolNames(mcpMode);
   const allTools = [
+      {
+        name: "contextgate_get_context",
+        title: "Get Bounded Repository Context",
+        description: "Natural context broker for coding agents. Compiles a coverage contract, evidence packet, missing slots, and bounded followups for the user's task. Use when repository evidence is needed and broad raw exploration would otherwise be likely; skip it for already-known exact file edits.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            task: { type: "string", description: "The user's natural task. For reviews, include the complete inline unified diff when available." },
+            task_type: {
+              type: "string",
+              enum: [
+                "api_flow",
+                "field_impact",
+                "review_diff",
+                "startup_flow",
+                "investigate",
+                "research_business",
+                "implement",
+                "write_unittest",
+                "build_handoff",
+                "unknown"
+              ],
+              description: "Optional task category. Use unknown when unsure."
+            },
+            required_slots: {
+              type: "array",
+              items: { type: "string" },
+              description: "Evidence slots the final answer must cover, such as source_files, symbols, tests, risks, backend_entrypoint, frontend_state."
+            },
+            budget_tokens: {
+              type: "number",
+              description: "Evidence budget."
+            },
+            quality_rubric: {
+              type: "array",
+              items: { type: "string" },
+              description: "Quality checks for the final answer."
+            },
+            detail: {
+              type: "string",
+              enum: ["compact", "full"],
+              description: "compact default; full for debugging."
+            },
+            include_structured_packet: {
+              type: "boolean",
+              description: "Return full structured packet."
+            },
+            cwd: { type: "string", description: "Working directory." }
+          },
+          required: ["task"],
+          additionalProperties: false
+        },
+        annotations: {
+          title: "ContextGate get context",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: false,
+          openWorldHint: false
+        }
+      },
       {
         name: "tokenopt_compile_evidence",
         title: "Compile Answerability Evidence",
@@ -504,6 +565,8 @@ export async function runMcpServer(): Promise<void> {
     }
     try {
       switch (request.params.name) {
+        case "contextgate_get_context":
+          return contextGateGetContextTool(args, mcpMode);
         case "tokenopt_compile_evidence":
           return compileEvidenceTool(args, mcpMode);
         case "tokenopt_run_command":
@@ -543,6 +606,173 @@ export async function runMcpServer(): Promise<void> {
   });
 
   await server.connect(new StdioServerTransport());
+}
+
+function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
+  const requiredSlots = optionalStringArray(args, "required_slots").slice(0, 12);
+  const qualityRubric = [
+    ...optionalStringArray(args, "quality_rubric"),
+    ...requiredSlots.map((slot) => `Cover evidence slot: ${slot}`)
+  ].slice(0, 12);
+  const result = compileEvidenceTool({
+    ...args,
+    quality_rubric: qualityRubric
+  }, mcpMode);
+  const originalText = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
+  const strictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
+  const refillFocusTerms = contextGateRefillFocusTerms(result.structuredContent);
+  const brokerText = strictGaps.length > 0
+    ? applyContextGateStrictOverride(originalText, strictGaps)
+    : originalText;
+  const text = [
+    brokerText
+      .replace(/^TokenOpt evidence packet compact/m, "ContextGate evidence packet compact")
+      .replace(/^TokenOpt compiled evidence packet/m, "ContextGate compiled evidence packet")
+      .replace(/TokenOpt compact mode: full packet is stored in state_path; call tokenopt_compile_evidence with detail=full only when debugging\./, "ContextGate compact mode: full packet is stored in state_path; request detail=full only when debugging."),
+    "",
+    "Context broker guidance:",
+    "- Treat this packet as a coverage contract, not a fixed tool script.",
+    "- If answerable=true, answer from the packet and stop acquiring duplicate context.",
+    strictGaps.length > 0 && refillFocusTerms.length > 0 ? `- Refill focus terms: ${refillFocusTerms.join(", ")}.` : undefined,
+    "- If required slots are missing, refill only those named slots with the cheapest bounded provider available in the session.",
+    "- Prefer exact source slices for named files/symbols over broad search, and report any still-missing slots honestly."
+  ].filter((line): line is string => Boolean(line)).join("\n");
+  return {
+    ...result,
+    content: [{ type: "text" as const, text }],
+    structuredContent: {
+      ...(result.structuredContent ?? {}),
+      broker: "contextgate",
+      requiredSlots,
+      strictMissingSlots: strictGaps,
+      refillFocusTerms,
+      effectiveAnswerable: strictGaps.length === 0 && contextGateBaseAnswerable(result.structuredContent),
+      recommendedNextAction: strictGaps.length > 0 ? "refill_missing_slots" : "answer_or_refill_from_contract",
+      naturalToolPolicy: "coverage-contract"
+    }
+  };
+}
+
+function contextGateRefillFocusTerms(structuredContent: Record<string, unknown> | undefined): string[] {
+  if (!structuredContent) {
+    return [];
+  }
+  const packet = isRecord(structuredContent.packet) ? structuredContent.packet : undefined;
+  const evidence = Array.isArray(packet?.evidence) ? packet.evidence : [];
+  const terms: string[] = [];
+  for (const item of evidence) {
+    if (!isRecord(item) || !Array.isArray(item.facts)) {
+      continue;
+    }
+    for (const fact of item.facts) {
+      if (typeof fact !== "string") {
+        continue;
+      }
+      const [key, value = ""] = fact.split("=", 2);
+      if (!/^(?:feature_terms|feature_source_files|feature_backend_files|feature_frontend_files|feature_test_files)$/.test(key)) {
+        continue;
+      }
+      for (const part of value.split(",")) {
+        const cleaned = part.trim();
+        if (cleaned && cleaned !== "none_detected" && isUsefulContextGateRefillTerm(cleaned)) {
+          terms.push(cleaned);
+        }
+      }
+    }
+  }
+  return uniqueStrings(terms).slice(0, 16);
+}
+
+function isUsefulContextGateRefillTerm(term: string): boolean {
+  const lower = term.toLowerCase();
+  if (/^(?:readme\.md|package\.json|pnpm-lock\.yaml|gradle|none_detected)$/i.test(term)) {
+    return false;
+  }
+  if (/\.(?:java|ts|tsx|vue|js|jsx|kt|py)$/i.test(term)) {
+    return true;
+  }
+  return selectExactFlowSearchTerms([term]).length > 0;
+}
+
+function contextGateStrictGaps(structuredContent: Record<string, unknown> | undefined, requiredSlots: string[]): string[] {
+  if (requiredSlots.length === 0 || !structuredContent) {
+    return [];
+  }
+  const dimensions = contextGateCoverageDimensions(structuredContent);
+  if (!dimensions) {
+    return [];
+  }
+  const slotCoverageKeys: Record<string, string[]> = {
+    source_files: ["feature_source_grounding", "source_grounding"],
+    backend_entrypoint_api: ["feature_backend_or_domain_grounding"],
+    service_domain_logic: ["feature_backend_or_domain_grounding"],
+    frontend_state_or_caller_when_present: ["feature_frontend_grounding"],
+    existing_tests: ["feature_test_grounding"],
+    tests_or_validation: ["feature_test_grounding"],
+    business_invariants_or_bug_symptom: ["business_invariants"],
+    changed_files: ["changed_files"],
+    changed_symbols: ["changed_symbols"]
+  };
+  const gaps: string[] = [];
+  for (const slot of requiredSlots) {
+    const keys = slotCoverageKeys[slot] ?? [];
+    if (keys.length === 0) {
+      continue;
+    }
+    const covered = keys.some((key) => dimensions[key] === "covered");
+    if (!covered) {
+      const statuses = keys
+        .map((key) => `${key}=${typeof dimensions[key] === "string" ? dimensions[key] : "missing"}`)
+        .join(",");
+      gaps.push(`${slot} (${statuses})`);
+    }
+  }
+  return gaps;
+}
+
+function contextGateCoverageDimensions(structuredContent: Record<string, unknown>): Record<string, unknown> | undefined {
+  const packetSummary = isRecord(structuredContent.packetSummary) ? structuredContent.packetSummary : undefined;
+  const coverageCertificate = packetSummary && isRecord(packetSummary.coverage_certificate)
+    ? packetSummary.coverage_certificate
+    : undefined;
+  if (coverageCertificate && isRecord(coverageCertificate.dimensions)) {
+    return coverageCertificate.dimensions;
+  }
+  const packet = isRecord(structuredContent.packet) ? structuredContent.packet : undefined;
+  return packet && isRecord(packet.coverage) ? packet.coverage : undefined;
+}
+
+function contextGateBaseAnswerable(structuredContent: Record<string, unknown> | undefined): boolean {
+  if (!structuredContent) {
+    return false;
+  }
+  const packetSummary = isRecord(structuredContent.packetSummary) ? structuredContent.packetSummary : undefined;
+  if (typeof packetSummary?.answerable === "boolean") {
+    return packetSummary.answerable;
+  }
+  const packet = isRecord(structuredContent.packet) ? structuredContent.packet : undefined;
+  return typeof packet?.answerable === "boolean" ? packet.answerable : false;
+}
+
+function applyContextGateStrictOverride(text: string, strictGaps: string[]): string {
+  const missing = [
+    "Missing:",
+    ...strictGaps.slice(0, 8).map((gap) => `- ContextGate strict slot still partial/missing: ${gap}`)
+  ].join("\n");
+  const followups = [
+    "Allowed followups:",
+    "- bounded_context: Refill only the named missing slots with the cheapest bounded context provider visible in this session.",
+    "- exact_source_slice: Prefer exact source slices for named files/symbols over broad ranked search."
+  ].join("\n");
+  return text
+    .replace("answerable: true", "answerable: false")
+    .replace("recommended_next_action: answer_now", "recommended_next_action: refill_missing_slots")
+    .replace("max_additional_calls: 0", "max_additional_calls: 2")
+    .replace("deny_broad_exploration: true", "deny_broad_exploration: false")
+    .replace(/coverage_gaps: none/, `coverage_gaps: ${strictGaps.join("; ")}`)
+    .replace(/Missing:\n- none/, missing)
+    .replace(/Allowed followups:\n- none/, followups)
+    .replace(/Because answerable=true, answer from the packet and do not gather redundant evidence\./g, "Because strict required slots remain partial, refill only those slots before the final answer.");
 }
 
 function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
@@ -3149,16 +3379,24 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "answer",
   "api",
   "application",
+  "acceptance",
   "behavior",
   "business",
+  "button",
+  "buttons",
   "called",
   "changing",
   "class",
   "client",
   "code",
+  "compatible",
   "compact",
   "concise",
+  "count",
+  "counts",
   "create",
+  "criteria",
+  "current",
   "cover",
   "daily",
   "default",
@@ -3168,6 +3406,7 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "explain",
   "existing_coverage",
   "existingcoverage",
+  "exclude",
   "files",
   "filter",
   "filtering",
@@ -3184,6 +3423,8 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "investigate",
   "json",
   "keys",
+  "learner",
+  "load",
   "likely",
   "likely_root_causes",
   "likelyrootcauses",
@@ -3201,6 +3442,7 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "produce",
   "project",
   "request",
+  "remains",
   "recall",
   "results",
   "rewrite",
@@ -3595,13 +3837,7 @@ function businessTaskMentionsFrontend(task: string): boolean {
 function selectBusinessFeatureTerms(task: string): string[] {
   const taskText = stripOutputContractText(task);
   const lower = taskText.toLowerCase();
-  const terms = uniqueStrings([
-    ...extractQuotedTerms(taskText),
-    ...extractCodeLikeTaskTerms(taskText),
-    ...extractStrongCodeLikeTaskTerms(taskText),
-    ...extractHyphenatedIdentifierVariants(taskText),
-    ...extractRouteTerms(taskText)
-  ]).filter(isUsefulFlowSearchTerm);
+  const terms: string[] = [];
 
   const add = (term: string): void => {
     if (isUsefulFlowSearchTerm(term) && !terms.some((existing) => existing.toLowerCase() === term.toLowerCase())) {
@@ -3636,6 +3872,16 @@ function selectBusinessFeatureTerms(task: string): string[] {
     add("loadMore");
     add("loadCurrentDueRecalls");
     add("treadmillMode");
+  }
+
+  for (const term of uniqueStrings([
+    ...extractQuotedTerms(taskText),
+    ...extractCodeLikeTaskTerms(taskText),
+    ...extractStrongCodeLikeTaskTerms(taskText),
+    ...extractHyphenatedIdentifierVariants(taskText),
+    ...extractRouteTerms(taskText)
+  ])) {
+    add(term);
   }
 
   return selectExactFlowSearchTerms(terms).slice(0, 12);
@@ -5074,11 +5320,12 @@ function sanitizeTaskPrompt(value: string): string {
 }
 
 function normalizeMcpMode(value = process.env.TOKENOPT_MCP_MODE): McpMode {
-  return value?.toLowerCase() === "full" ? "full" : "lite";
+  const mode = value?.toLowerCase();
+  return mode === "full" ? "full" : mode === "broker" ? "broker" : "lite";
 }
 
 function getExposedMcpToolNames(mode: McpMode): Set<string> {
-  return mode === "full" ? FULL_MCP_TOOL_NAMES : LITE_MCP_TOOL_NAMES;
+  return mode === "full" ? FULL_MCP_TOOL_NAMES : mode === "broker" ? BROKER_MCP_TOOL_NAMES : LITE_MCP_TOOL_NAMES;
 }
 
 function buildEvidenceStructuredContent(packet: EvidencePacket, statePath: string, includePacket: boolean): Record<string, unknown> {
@@ -5440,6 +5687,10 @@ function textResult(text: string, isError = false, structuredContent?: Record<st
     isError,
     structuredContent
   };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function requiredString(args: Record<string, unknown>, key: string): string {

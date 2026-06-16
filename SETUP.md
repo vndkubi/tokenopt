@@ -72,12 +72,13 @@ npx.cmd -y @openai/codex@0.137.0 exec `
   -C <target-repo> `
   -c "mcp_servers.tokenopt.command='node'" `
   -c "mcp_servers.tokenopt.args=['<tokenopt-repo>/dist/cli.js','mcp','--mode','lite']" `
-  "Use TokenOpt as a cost gate: call tokenopt_compile_evidence only when it can replace broad exploration, then answer from the packet if answerable=true."
+  "Use ContextGate as an evidence broker when it can replace broad exploration. Keep the user prompt natural, answer from the packet if answerable=true, and refill only named missing slots."
 ```
 
 TokenOpt MCP defaults to lite mode so the MCP tool schemas do not cost more context than they save. Lite mode exposes:
 
 ```text
+contextgate_get_context
 tokenopt_compile_evidence
 tokenopt_search
 tokenopt_read_file
@@ -134,19 +135,20 @@ Copilot may ignore MCP unless the relevant instruction/custom-agent files are lo
 Expected agent flow:
 
 ```text
-1. Use TokenOpt first only when it can replace broad exploration.
-2. Call tokenopt_compile_evidence({ task, task_type, cwd, budget_tokens, quality_rubric })
-3. If answerable=true and recommended_next_action=answer_now, answer from the packet.
-4. If missing items exist, use only allowed_followups in strict MCP-only mode; in shell-enabled sessions, do not do MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
-5. Redundant MCP exploration after answerable=true is gated.
-6. With Codex hooks trusted, shell grep/search after a packet is denied when TokenOpt has already provided answer-now guidance or exact TokenOpt followups.
+1. Keep the user's natural prompt and project/agent instructions authoritative.
+2. Use contextgate_get_context only when it can replace broad exploration.
+3. Pass the natural task, inferred task_type, cwd, required_slots, budget_tokens, and quality_rubric.
+4. If answerable=true and recommended_next_action=answer_now, answer from the packet.
+5. If slots are missing, refill only those named slots; avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
+6. Redundant MCP exploration after answerable=true is gated.
+7. With Codex hooks trusted, shell grep/search after a packet is denied when ContextGate has already provided answer-now guidance or exact followups.
 ```
 
-For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", use TokenOpt only in strict MCP-only mode or when the packet can provide the full evidence path. In normal shell-enabled agent mode, start with narrow native search/read instead of calling TokenOpt first and then repeating the same work through shell. For prompts such as "study business and deep dive that business", TokenOpt can be useful because docs/inventory often provide enough evidence without shell fallback.
+For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", use ContextGate only in strict MCP-only mode or when the packet can provide the full evidence path. In normal shell-enabled agent mode, start with narrow native search/read instead of calling ContextGate first and then repeating the same work through shell. For prompts such as "study business and deep dive that business", ContextGate can be useful because docs/inventory often provide enough evidence without shell fallback.
 
 Do not paste benchmark/report fields into normal prompts. Text such as `Project instruction injected by TokenOpt setup:`, `injectedInstruction`, or `actualPromptSentToCodex` is diagnostic output for benchmark reports, not something the user should include in chat.
 
-`tokenopt_compile_evidence` defaults to compact output. Full evidence is saved in `state_path`; pass `detail=full` only when debugging or producing a benchmark/audit report.
+`contextgate_get_context` defaults to compact broker output. Full evidence is saved in `state_path`; pass `detail=full` only when debugging or producing a benchmark/audit report. `tokenopt_compile_evidence` remains available for older instructions and direct benchmark compatibility.
 
 ## Codex Hooks Setup
 

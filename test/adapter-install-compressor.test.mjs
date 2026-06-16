@@ -106,7 +106,7 @@ test("repo keys differ for unrelated roots", () => {
 test("instruction emitter and installer produce idempotent MCP guidance", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-instructions-"));
   const snippet = emitTokenOptInstructions("agents");
-  assert.match(snippet, /tokenopt_compile_evidence/);
+  assert.match(snippet, /contextgate_get_context/);
   assert.match(snippet, /answerable=true/);
 
   const agentsPath = installTokenOptInstructions(repo, "agents");
@@ -118,7 +118,7 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
 
   const copilotPath = installTokenOptInstructions(repo, "copilot");
   assert.equal(copilotPath, path.join(repo, ".github", "copilot-instructions.md"));
-  assert.match(fs.readFileSync(copilotPath, "utf8"), /TokenOpt MCP Usage/);
+  assert.match(fs.readFileSync(copilotPath, "utf8"), /ContextGate MCP Usage/);
 
   const copilotPathInstructionsPath = installTokenOptInstructions(repo, "copilot-path");
   assert.equal(copilotPathInstructionsPath, path.join(repo, ".github", "instructions", "tokenopt.instructions.md"));
@@ -126,8 +126,8 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
 
   const copilotAgentPath = installTokenOptInstructions(repo, "copilot-agent");
   assert.equal(copilotAgentPath, path.join(repo, ".github", "agents", "tokenopt-cost-gate.agent.md"));
-  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /name: tokenopt-cost-gate/);
-  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /tokenopt\/tokenopt_compile_evidence/);
+  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /name: contextgate-cost-gate/);
+  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /tokenopt\/contextgate_get_context/);
 });
 
 test("native prompt pack installs reusable Copilot prompt files", () => {
@@ -233,9 +233,9 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
 
   assert.equal((copilotInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
   assert.match(copilotPathInstructions, /applyTo: "\*\*"/);
-  assert.match(copilotPathInstructions, /TokenOpt MCP Usage/);
-  assert.match(copilotAgent, /name: tokenopt-cost-gate/);
-  assert.match(copilotAgent, /tokenopt\/tokenopt_compile_evidence/);
+  assert.match(copilotPathInstructions, /ContextGate MCP Usage/);
+  assert.match(copilotAgent, /name: contextgate-cost-gate/);
+  assert.match(copilotAgent, /tokenopt\/contextgate_get_context/);
   assert.match(writeUnittestPrompt, /name: write-unittest/);
   assert.match(traceBugPrompt, /name: trace-bug/);
   assert.equal(result.promptFiles.length, 27);
@@ -243,6 +243,7 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.deepEqual(config.mcpServers.keep.tools, ["*"]);
   assert.equal(config.mcpServers.tokenopt.command, "node");
   assert.deepEqual(config.mcpServers.tokenopt.args, [tokenoptCliPath.replace(/\\/g, "/"), "mcp", "--mode", "lite"]);
+  assert.ok(config.mcpServers.tokenopt.tools.includes("contextgate_get_context"));
   assert.ok(config.mcpServers.tokenopt.tools.includes("tokenopt_compile_evidence"));
   assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_run_command"));
   assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_project_facts"));
@@ -255,6 +256,7 @@ test("Copilot cloud MCP example excludes command execution by default", () => {
   const config = JSON.parse(buildCopilotCloudMcpConfig());
   assert.equal(config.mcpServers.tokenopt.command, "npx");
   assert.deepEqual(config.mcpServers.tokenopt.args, ["-y", "@tokenopt/cli", "mcp", "--mode", "lite"]);
+  assert.ok(config.mcpServers.tokenopt.tools.includes("contextgate_get_context"));
   assert.ok(config.mcpServers.tokenopt.tools.includes("tokenopt_compile_evidence"));
   assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_run_command"));
 });

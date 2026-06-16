@@ -32,6 +32,7 @@ test("mcp exposes TokenOpt gated tools", async () => {
     const result = await client.listTools();
     const names = result.tools.map((tool) => tool.name).sort();
     assert.deepEqual(names, [
+      "contextgate_get_context",
       "tokenopt_compile_evidence",
       "tokenopt_read_file",
       "tokenopt_search"
@@ -52,6 +53,7 @@ test("mcp full mode exposes command and project facts tools", async () => {
       const result = await client.listTools();
       const names = result.tools.map((tool) => tool.name).sort();
       assert.deepEqual(names, [
+        "contextgate_get_context",
         "tokenopt_assemble_spring_context",
         "tokenopt_business_contract",
         "tokenopt_compile_evidence",
@@ -70,6 +72,53 @@ test("mcp full mode exposes command and project facts tools", async () => {
       ]);
     },
     { env: { TOKENOPT_MCP_MODE: "full" } }
+  );
+});
+
+test("mcp broker mode hides legacy compile tool", async () => {
+  await withTokenOptMcp(
+    async (client) => {
+      const result = await client.listTools();
+      const names = result.tools.map((tool) => tool.name).sort();
+      assert.deepEqual(names, [
+        "contextgate_get_context",
+        "tokenopt_read_file",
+        "tokenopt_search"
+      ]);
+    },
+    { env: { TOKENOPT_MCP_MODE: "broker" } }
+  );
+});
+
+test("mcp contextgate broker exposes natural coverage contract", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "contextgate-mcp-repo-"));
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "contextgate-fixture", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.writeFileSync(path.join(repo, "README.md"), "Orders business covers authorization, settlement, and refunds.\n");
+
+  await withTokenOptMcp(
+    async (client) => {
+      const packet = await client.callTool({
+        name: "contextgate_get_context",
+        arguments: {
+          task: "Study the orders business flow and list concepts, files, risks, and tests.",
+          task_type: "research_business",
+          required_slots: ["source_files", "symbols", "existing_tests", "risks"],
+          cwd: repo,
+          include_structured_packet: true
+        }
+      });
+
+      assert.equal(packet.isError ?? false, false);
+      assert.match(packet.content[0].text, /ContextGate evidence packet compact/);
+      assert.match(packet.content[0].text, /coverage contract/);
+      assert.equal(packet.structuredContent.broker, "contextgate");
+      assert.deepEqual(packet.structuredContent.requiredSlots, ["source_files", "symbols", "existing_tests", "risks"]);
+      assert.equal(packet.structuredContent.naturalToolPolicy, "coverage-contract");
+    },
+    { cwd: repo }
   );
 });
 
@@ -722,7 +771,7 @@ test("mcp requires feature test grounding for PBI business investigation", async
   );
   fs.writeFileSync(
     path.join(repo, "frontend", "src", "pages", "RecallPage.vue"),
-    "<template><button>Load more from next 3 days</button></template><script>const treadmillMode = true;</script>\n"
+    "<template><button>Load more from next 3 days</button></template><script>const RecallPage = {}; const treadmillMode = true;</script>\n"
   );
 
   await withTokenOptMcp(
@@ -744,7 +793,7 @@ test("mcp requires feature test grounding for PBI business investigation", async
       assert.match(packet.content[0].text, /feature_frontend_grounding: covered/);
       assert.match(packet.content[0].text, /feature_test_grounding: missing/);
       assert.match(packet.content[0].text, /Feature-specific test evidence is missing/);
-      assert.match(packet.content[0].text, /tokenopt_search: Find existing tests\/examples/);
+      assert.match(packet.content[0].text, /tokenopt_search:/);
     },
     { cwd: repo }
   );

@@ -7,6 +7,7 @@ import { installNativePromptPack, installTokenOptInstructions } from "./instruct
 export type CopilotSetupScope = "user" | "repo" | "both";
 
 export const TOKENOPT_COPILOT_LITE_MCP_TOOLS = [
+  "contextgate_get_context",
   "tokenopt_compile_evidence",
   "tokenopt_search",
   "tokenopt_read_file"

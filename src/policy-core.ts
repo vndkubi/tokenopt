@@ -65,8 +65,8 @@ function evaluatePrompt(event: TokenOptEvent, config: TokenOptConfig): PolicyDec
     return {
       action: "deny",
       reason:
-        "Prompt appears to include TokenOpt injected benchmark/setup instruction text. Do not paste lines like " +
-        "\"Project instruction injected by TokenOpt setup\" or \"When TokenOpt MCP tools are available\" into the user prompt. " +
+        "Prompt appears to include ContextGate/TokenOpt injected benchmark/setup instruction text. Do not paste lines like " +
+        "\"Project instruction injected by TokenOpt setup\" or \"When the TokenOpt MCP server is available\" into the user prompt. " +
         "Send only the actual task, for example: \"Study <business/module> business flow, concepts, and glossary. Keep exploration bounded and cite evidence.\""
     };
   }
@@ -353,6 +353,8 @@ function containsInjectedTokenOptInstructionPaste(text: string): boolean {
   return [
     /Project instruction injected by TokenOpt setup:/i,
     /The user may ask naturally and does not need to name MCP tools[\s\S]*When TokenOpt MCP tools are available/i,
+    /When the TokenOpt MCP server is available[\s\S]*contextgate_get_context/i,
+    /ContextGate is active as an evidence broker/i,
     /benchmark oracle classifies the task_type/i,
     /actualPromptSentToCodex:/i
   ].some((pattern) => pattern.test(text));
