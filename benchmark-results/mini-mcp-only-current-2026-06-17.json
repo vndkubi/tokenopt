@@ -1,0 +1,228 @@
+{
+  "generatedAt": "2026-06-16T23:12:10.295Z",
+  "runner": "codex exec --json",
+  "codexPackage": "@openai/codex@0.137.0",
+  "suite": {
+    "path": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\mini-tokenopt-comparison-suite.json",
+    "name": "mini-tokenopt-natural-comparison",
+    "version": "2026-06-16",
+    "purpose": "Controlled mini suite to compare baseline/mcp/codegraph/hybrid token economics on same prompts."
+  },
+  "codegraph": {
+    "prewarm": false,
+    "prewarmTimeoutMs": 1800000
+  },
+  "modes": [
+    "mcp-only"
+  ],
+  "skippedRepos": [],
+  "rows": [
+    {
+      "exitCode": 0,
+      "durationMs": 237356,
+      "finalAnswer": "{\n  \"project_overview\": \"TokenOpt is a TypeScript project providing a Codex-first, reusable context-budget middleware for coding agents, distributed as an `@tokenopt/cli` package (`v0.1.0`) with a core policy engine kept independent from specific repository indexers.\",\n  \"commands\": {\n    \"status\": \"unresolved\",\n    \"reason\": \"TokenOpt followups returned repository metadata and file inventory, but did not return `src/cli.ts` contents, so top-level CLI commands could not be extracted from source in this session.\"\n  },\n  \"files\": [\n    \"src/cli.ts\",\n    \"README.md\",\n    \"package.json\",\n    \"package-lock.json\"\n  ],\n  \"risks\": [\n    \"Command inventory is incomplete because `src/cli.ts` line-level evidence could not be read.\",\n    \"Any inferred command list from package scripts alone may be incorrect (`build`, `doctor`, `test` appear as npm scripts, not proven top-level CLI subcommands).\",\n    \"Any follow-up work should re-run exact TokenOpt followups for `src/cli.ts` slices before relying on command coverage.\"\n  ]\n}",
+      "routeMetadataText": "acquisition_mode: direct_narrow\nevidence_contract: trace_proof\nevidence_contract_pass: false",
+      "usage": {
+        "input_tokens": 502372,
+        "cached_input_tokens": 457984,
+        "output_tokens": 11603,
+        "reasoning_output_tokens": 9406
+      },
+      "usageStatus": "available",
+      "toolCalls": 22,
+      "shellCalls": 0,
+      "mcpCalls": 22,
+      "toolInputChars": 4593,
+      "toolOutputChars": 110676,
+      "warnings": 404,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M1-cli-commands-mcp-only.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M1-cli-commands-mcp-only-last.txt",
+      "repo": "D:\\Personal\\Projects\\tokenopt",
+      "project": "tokenopt",
+      "taskId": "M1-cli-commands",
+      "taskClass": "build_handoff",
+      "acquisitionMode": "direct_narrow",
+      "evidenceContract": "trace_proof",
+      "evidenceContractPass": false,
+      "fallbackReason": "",
+      "doubleSpend": true,
+      "mode": "mcp-only",
+      "prompt": "Return valid compact JSON only with keys project_overview, commands, files, risks. \"project_overview\": concise 1-2 line summary of this repository. \"commands\": top-level CLI commands from src/cli.ts. \"files\": files referenced by commands if inferable. \"risks\": implementation risks. Do not modify files.",
+      "codexPrompt": "Task (do not rephrase):\nReturn valid compact JSON only with keys project_overview, commands, files, risks. \"project_overview\": concise 1-2 line summary of this repository. \"commands\": top-level CLI commands from src/cli.ts. \"files\": files referenced by commands if inferable. \"risks\": implementation risks. Do not modify files.\n\nBenchmark constraints:\n- Preserve the requested output format exactly.\n- Cite repository-relative files when the task asks for citations.\n- Do not modify files.\n- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.\n- Repository root: D:\\Personal\\Projects\\tokenopt\n\n- Use the TokenOpt MCP tool tokenopt_compile_evidence first.\n- Call it with cwd=D:\\Personal\\Projects\\tokenopt, task_type=build_handoff, and budget_tokens around 1200.\n- For tokenopt_compile_evidence, pass task as the complete user request above.\n- Ground the final answer in packet evidence.\n- If tokenopt_compile_evidence returns answerable=true, answer from the packet. If it returns answerable=false, use only exact TokenOpt search/read followups for missing named symbols, routes, files, or test evidence.\n- Shell is disabled for this benchmark mode; use only TokenOpt MCP tools and state any unresolved evidence honestly.",
+      "qualityScore": 0.333,
+      "qualityChecks": "2/6",
+      "qualityPassed": false,
+      "ideaScore": 0.5,
+      "ideaChecks": "4/8",
+      "ideaPassed": false,
+      "correct": false,
+      "jsonValid": true,
+      "criticalMisses": [
+        "symbol:helpText",
+        "term:benchmark",
+        "term:hook",
+        "term:mcp"
+      ],
+      "expectedEvidence": {
+        "files": [
+          "src/cli.ts"
+        ],
+        "symbols": [
+          "helpText"
+        ],
+        "terms": [
+          "benchmark",
+          "hook",
+          "mcp"
+        ]
+      },
+      "qualityRubric": [
+        "includes project summary",
+        "lists command families",
+        "references evidence-bearing files",
+        "mentions one key risk",
+        "contains valid compact JSON"
+      ]
+    },
+    {
+      "exitCode": 0,
+      "durationMs": 145911,
+      "finalAnswer": "{\n  \"command_list\": [\n    \"tokenopt_compile_evidence(cwd=D:/Personal/Projects/tokenopt, task_type=api_flow, budget_tokens=1200, task=<full user request>)\",\n    \"tokenopt_search(path=., pattern=benchmark)\",\n    \"tokenopt_read_file(path=README.md, startLine=1, maxLines=80)\",\n    \"tokenopt_read_file(path=src/benchmark.ts, startLine=1, maxLines=220)\",\n    \"tokenopt_read_file(path=src/codex-benchmark.ts, startLine=1, maxLines=240)\",\n    \"tokenopt_search(path=src, pattern=mcp)\",\n    \"tokenopt_search(path=., pattern=rephrase)\"\n  ],\n  \"setup_flow\": {\n    \"today_selection_state\": \"Not fully determinable from packet-grounded evidence; answerable=false because exact source matches for the requested routing/symbol/anchor are missing.\",\n    \"what_is_confirmed_today\": \"Only repository-shape and candidate files are confirmed (e.g., `package.json`, `README.md`, `src/benchmark.ts`, `src/codex-benchmark.ts`, `src/codex-adapter.ts`, `src/config.ts`) and a summary that this repo is a Codex-first CLI with core policy kept independent from CodeGraph indexers.\",\n    \"how_modes_selected_today\": {\n      \"benchmark\": \"Selection logic path not found in provided evidence (no exact mode dispatch snippet surfaced).\",\n      \"mcp\": \"No direct evidence snippet was surfaced for `mcp` mode selection in this packet.\",\n      \"codegraph\": \"No direct evidence snippet was surfaced for `codegraph` mode selection in this packet.\"\n    },\n    \"citations\": [\n      \"README.md (evidence claim: mode/positioning context)\",\n      \"package.json (repo packaging context)\",\n      \"src/benchmark.ts (candidate benchmark-related implementation path)\",\n      \"src/codex-benchmark.ts (candidate benchmark-adapter path)\",\n      \"src/codex-adapter.ts (candidate adapter path)\",\n      \"src/config.ts (candidate config path)\"\n    ],\n    \"resolution_status\": \"Unresolved: exact mode-selection behavior requires additional allowed TokenOpt followups against the exact matching symbols/routes/files/tests.\"\n  },\n  \"quality_focus\": [\n    {\n      \"mode\": \"benchmark\",\n      \"selection_signal_goal\": \"Should be selected when behavioral ground-truth on end-to-end runs is the priority.\",\n      \"today_confidence\": \"unknown (unverified in evidence)\",\n      \"signal_benefit\": \"High confidence in execution-path outcomes, output shape stability, and budget-policy observability.\",\n      \"cost_profile\": \"Higher token/use cost than lightweight checks due richer traces and output volume.\"\n    },\n    {\n      \"mode\": \"mcp\",\n      \"selection_signal_goal\": \"Should be selected when external protocol/tool-call fidelity matters (adapter boundary behavior).\",\n      \"today_confidence\": \"unknown (unverified in evidence)\",\n      \"signal_benefit\": \"Good signal for protocol adherence and interaction correctness, typically narrower than full benchmark captures.\",\n      \"cost_profile\": \"Moderate token/use cost; mostly metadata and contract-facing call evidence.\"\n    },\n    {\n      \"mode\": \"codegraph\",\n      \"selection_signal_goal\": \"Should be selected when structural/code-level reachability and symbol-graph evidence is needed.\",\n      \"today_confidence\": \"unknown (unverified in evidence)\",\n      \"signal_benefit\": \"High structural signal for architectural risk, cross-file causality, and latent dependency effects.\",\n      \"cost_profile\": \"Highest precompute/maintenance cost when graph indexes are built; can amortize if reused.\"\n    },\n    {\n      \"overall_tradeoff_summary\": \"Given current evidence, a pragmatic policy is: default to benchmark for high-signal correctness, fallback to mcp for medium-signal interface/adapter checks, and use codegraph only when graph-level risk/reasoning value exceeds its build/query cost.\"\n    }\n  ],\n  \"output_shape\": {\n    \"requested_format\": \"Strict JSON with keys command_list, setup_flow, quality_focus, output_shape\",\n    \"mode_object_schema\": {\n      \"mode\": \"benchmark|mcp|codegraph\",\n      \"selection_gate\": \"unknown|explicit_rule|config_flag|env_flag|route_name\",\n      \"signal\": \"what is being gained\",\n      \"cost\": \"token and runtime burden\",\n      \"evidence\": [\n        \"repository-relative file paths and evidence IDs\"\n      ]\n    }\n  }\n}",
+      "routeMetadataText": "acquisition_mode: compile_evidence\nevidence_contract: overview_contract\nevidence_contract_pass: false",
+      "usage": {
+        "input_tokens": 455023,
+        "cached_input_tokens": 429056,
+        "output_tokens": 11034,
+        "reasoning_output_tokens": 8154
+      },
+      "usageStatus": "available",
+      "toolCalls": 21,
+      "shellCalls": 0,
+      "mcpCalls": 21,
+      "toolInputChars": 4289,
+      "toolOutputChars": 148876,
+      "warnings": 387,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M2-benchmark-modes-mcp-only.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M2-benchmark-modes-mcp-only-last.txt",
+      "repo": "D:\\Personal\\Projects\\tokenopt",
+      "project": "tokenopt",
+      "taskId": "M2-benchmark-modes",
+      "taskClass": "investigate",
+      "acquisitionMode": "compile_evidence",
+      "evidenceContract": "overview_contract",
+      "evidenceContractPass": false,
+      "fallbackReason": "",
+      "doubleSpend": false,
+      "mode": "mcp-only",
+      "prompt": "Return valid compact JSON only with keys command_list, setup_flow, quality_focus, output_shape. Explain how benchmark, mcp, and codegraph modes are selected today and what each mode should buy as signal/cost tradeoff.",
+      "codexPrompt": "Task (do not rephrase):\nReturn valid compact JSON only with keys command_list, setup_flow, quality_focus, output_shape. Explain how benchmark, mcp, and codegraph modes are selected today and what each mode should buy as signal/cost tradeoff.\n\nBenchmark constraints:\n- Preserve the requested output format exactly.\n- Cite repository-relative files when the task asks for citations.\n- Do not modify files.\n- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.\n- Repository root: D:\\Personal\\Projects\\tokenopt\n\n- Use the TokenOpt MCP tool tokenopt_compile_evidence first.\n- Call it with cwd=D:\\Personal\\Projects\\tokenopt, task_type=api_flow, and budget_tokens around 1200.\n- For tokenopt_compile_evidence, pass task as the complete user request above.\n- Ground the final answer in packet evidence.\n- If tokenopt_compile_evidence returns answerable=true, answer from the packet. If it returns answerable=false, use only exact TokenOpt search/read followups for missing named symbols, routes, files, or test evidence.\n- Shell is disabled for this benchmark mode; use only TokenOpt MCP tools and state any unresolved evidence honestly.",
+      "qualityScore": 0.667,
+      "qualityChecks": "6/9",
+      "qualityPassed": false,
+      "ideaScore": 0.375,
+      "ideaChecks": "3/8",
+      "ideaPassed": false,
+      "correct": false,
+      "jsonValid": true,
+      "criticalMisses": [
+        "file:src/suite-benchmark.ts",
+        "symbol:runSuiteBenchmarkCommand",
+        "symbol:buildSuitePrompt"
+      ],
+      "expectedEvidence": {
+        "files": [
+          "README.md",
+          "src/suite-benchmark.ts"
+        ],
+        "symbols": [
+          "runSuiteBenchmarkCommand",
+          "buildSuitePrompt"
+        ],
+        "terms": [
+          "tokenopt",
+          "codegraph",
+          "quality",
+          "benchmark"
+        ]
+      },
+      "qualityRubric": [
+        "maps tradeoff between token cost and signal",
+        "covers benchmark and mcp selection",
+        "mentions output shape",
+        "contains valid compact JSON"
+      ]
+    },
+    {
+      "exitCode": 0,
+      "durationMs": 141691,
+      "finalAnswer": "{\"modes\":[{\"mode\":\"review\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\"]},{\"mode\":\"debug\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\"]},{\"mode\":\"refactor\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\"]},{\"mode\":\"exact\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\"]},{\"mode\":\"small-repo-bypass\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:38\"]}],\"token_guardrails\":[{\"guard\":\"Router is rule-based with negative controls\",\"evidence\":[\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:38\",\"src/router.ts\"]},{\"guard\":\"Router changes are constrained by route-bucket calibration and benchmark evidence\",\"evidence\":[\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:463\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:485\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:526\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:507\"]}],\"fallback_policy\":[{\"policy\":\"No explicit fallback branch or default-route behavior is directly surfaced in the retrievable source lines.\",\"evidence\":[\"src/router.ts\",\"test/mvp-router-shadow-compressors.test.mjs\"]},{\"policy\":\"Special-case routing path appears in the documented task buckets via the \\\"small-repo bypass\\\" route class.\",\"evidence\":[\"test/mvp-router-shadow-compressors.test.mjs:14\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:38\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md:463\"]},{\"policy\":\"Research evidence references runtime-determined fetches not being pre-fetched, implying no speculative fallback path is used there.\",\"evidence\":[\"research/contextgate-complete-research-synthesis.md:274\"]}],\"unknowns\":[{\"item\":\"Exact router guards, branch conditions, and fallback handler code are not readable with current TokenOpt followups (read calls returned metadata-only headers).\",\"evidence\":[\"src/router.ts\",\"tokenopt read output: no line body returned\"]},{\"item\":\"Exact decision order and safety checks across request modes are therefore not fully provable from this packet.\",\"evidence\":[\"src/router.ts\",\"test/mvp-router-shadow-compressors.test.mjs\",\"TOKEN_OPTIMIZATION_IMPLEMENTATION_SPEC.md\"]}]}",
+      "routeMetadataText": "acquisition_mode: direct_narrow\nevidence_contract: trace_proof\nevidence_contract_pass: false\nacquisition_mode: compile_evidence\nevidence_contract: overview_contract",
+      "usage": {
+        "input_tokens": 590955,
+        "cached_input_tokens": 561024,
+        "output_tokens": 13736,
+        "reasoning_output_tokens": 11404
+      },
+      "usageStatus": "available",
+      "toolCalls": 22,
+      "shellCalls": 0,
+      "mcpCalls": 22,
+      "toolInputChars": 3449,
+      "toolOutputChars": 105790,
+      "warnings": 435,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M3-router-safety-mcp-only.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-mcp-only-current-2026-06-17\\tokenopt-M3-router-safety-mcp-only-last.txt",
+      "repo": "D:\\Personal\\Projects\\tokenopt",
+      "project": "tokenopt",
+      "taskId": "M3-router-safety",
+      "taskClass": "investigate",
+      "acquisitionMode": "direct_narrow",
+      "evidenceContract": "trace_proof",
+      "evidenceContractPass": false,
+      "fallbackReason": "",
+      "doubleSpend": true,
+      "mode": "mcp-only",
+      "prompt": "Return valid compact JSON only with keys modes, token_guardrails, fallback_policy, unknowns. Use only information visible in code path references to describe router safety and fallback behavior.",
+      "codexPrompt": "Task (do not rephrase):\nReturn valid compact JSON only with keys modes, token_guardrails, fallback_policy, unknowns. Use only information visible in code path references to describe router safety and fallback behavior.\n\nBenchmark constraints:\n- Preserve the requested output format exactly.\n- Cite repository-relative files when the task asks for citations.\n- Do not modify files.\n- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.\n- Repository root: D:\\Personal\\Projects\\tokenopt\n\n- Use the TokenOpt MCP tool tokenopt_compile_evidence first.\n- Call it with cwd=D:\\Personal\\Projects\\tokenopt, task_type=api_flow, and budget_tokens around 1200.\n- For tokenopt_compile_evidence, pass task as the complete user request above.\n- Ground the final answer in packet evidence.\n- If tokenopt_compile_evidence returns answerable=true, answer from the packet. If it returns answerable=false, use only exact TokenOpt search/read followups for missing named symbols, routes, files, or test evidence.\n- Shell is disabled for this benchmark mode; use only TokenOpt MCP tools and state any unresolved evidence honestly.",
+      "qualityScore": 0.4,
+      "qualityChecks": "4/10",
+      "qualityPassed": false,
+      "ideaScore": 0.5,
+      "ideaChecks": "4/8",
+      "ideaPassed": false,
+      "correct": false,
+      "jsonValid": true,
+      "criticalMisses": [
+        "file:src/suite-benchmark.ts",
+        "file:src/workflow-ab-benchmark.ts",
+        "symbol:routeTask",
+        "symbol:parseWorkflow",
+        "term:fallback_after_answerable",
+        "term:tool policy"
+      ],
+      "expectedEvidence": {
+        "files": [
+          "src/router.ts",
+          "src/suite-benchmark.ts",
+          "src/workflow-ab-benchmark.ts"
+        ],
+        "symbols": [
+          "routeTask",
+          "parseWorkflow"
+        ],
+        "terms": [
+          "router",
+          "fallback",
+          "fallback_after_answerable",
+          "tool policy"
+        ]
+      },
+      "qualityRubric": [
+        "names routing inputs and outputs",
+        "describes fallback policy",
+        "mentions unknowns explicitly",
+        "contains valid compact JSON"
+      ]
+    }
+  ]
+}

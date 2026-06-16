@@ -112,6 +112,47 @@ test("contextgate natural prompt uses evidence contract instead of fixed tool ca
   assert.doesNotMatch(prompt, /CodeGraph/);
 });
 
+test("tokenopt codegraph natural prompt stays route-aware without fixed tool scripts", () => {
+  const prompt = buildSuitePrompt(
+    "D:\\Personal\\Projects\\doughnut",
+    {
+      id: "doughnut-recall-forecast-pbi-implement",
+      project: "doughnut",
+      class: "implement_code_unittest",
+      winnerHypothesis: "",
+      prompt: "Implement the Recall forecast-count PBI with backend and frontend coverage. Return valid compact JSON with files, symbols, tests_to_run, risks.",
+      expectedEvidence: { files: [], symbols: [], terms: [] },
+      qualityRubric: ["Connect backend API behavior, frontend state, business invariants, and tests."],
+      gateAssertions: [],
+      maxBudget: { packetTokens: 1800 }
+    },
+    "tokenopt-codegraph-natural"
+  );
+
+  assert.match(prompt, /Implement the Recall forecast-count PBI/);
+  assert.match(prompt, /Route policy:/);
+  assert.match(prompt, /normal developer request/);
+  assert.match(prompt, /Evidence intent for context acquisition only/);
+  assert.match(prompt, /Do not pass output-schema boilerplate/);
+  assert.match(prompt, /Required evidence slots/);
+  assert.match(prompt, /Choose the next action by the missing evidence slot/);
+  assert.match(prompt, /Hard budget: use at most 3 context\/source tool calls total/);
+  assert.match(prompt, /no line range, symbol, or bounded slice hint/);
+  assert.match(prompt, /business behavior coverage/);
+  assert.match(prompt, /flat strings and short arrays/);
+  assert.match(prompt, /Shell fallback is disabled/);
+  assert.doesNotMatch(prompt, /tokenopt_compile_evidence/);
+  assert.doesNotMatch(prompt, /\bTokenOpt\b/);
+  assert.doesNotMatch(prompt, /\bCodeGraph\b/);
+  assert.doesNotMatch(prompt, /\bget_flow_pack\b/);
+  assert.doesNotMatch(prompt, /\bget_change_pack\b/);
+  assert.doesNotMatch(prompt, /\breview_patch\b/);
+  assert.doesNotMatch(prompt, /\bsearch_symbol\b/);
+  assert.doesNotMatch(prompt, /\bget_file_slice\b/);
+  assert.doesNotMatch(prompt, /First call/i);
+  assert.doesNotMatch(prompt, /Then call/i);
+});
+
 test("suite benchmark metadata reports acquisition mode and contract", () => {
   const metadata = buildSuiteRouteMetadata(
     "Tracebug OrderService.java:42 failing test OrderServiceTest.shouldRejectMissingPartition",

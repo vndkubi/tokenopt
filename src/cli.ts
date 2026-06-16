@@ -410,8 +410,8 @@ Commands:
   tokenopt mcp [--mode lite|full]
   tokenopt benchmark daily --repo <path> [--mode all]
   tokenopt benchmark codex-daily --repo <path> [--mode all]
-  tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline|tokenopt-only|codegraph-only|tokenopt-codegraph|tokenopt-codegraph-hybrid|all]
-  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-tokenopt]
+  tokenopt benchmark suite --suite <json> --repo <path> [--mode baseline|codegraph|codegraph-only|tokenopt-only|tokenopt-codegraph|tokenopt-codegraph-natural|tokenopt-codegraph-adaptive|tokenopt-codegraph-hybrid|natural|contextgate|contextgate-natural|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all]
+  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-only,speckit-tokenopt]
   tokenopt instructions audit
   tokenopt instructions emit --target agents|codex|copilot|copilot-path|copilot-agent
   tokenopt instructions graph

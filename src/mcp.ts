@@ -2388,14 +2388,22 @@ function buildRepoInventory(cwd: string, config: TokenOptConfig, repoRoot: strin
 function collectRepoFiles(cwd: string, repoRoot: string): ProviderFileList {
   const diagnostics: string[] = [];
   const rg = runFileListCommand("rg", ["--files"], cwd);
-  if (rg.files.length > 0) {
-    return { provider: "rg", files: rg.files, raw: rg.stdout, diagnostics };
+  const rgFiles = filterRepoInventoryFiles(rg.files);
+  if (rgFiles.files.length > 0) {
+    if (rgFiles.removed > 0) {
+      diagnostics.push(`inventory ignored generated/artifact paths: ${rgFiles.removed}`);
+    }
+    return { provider: "rg", files: rgFiles.files, raw: rgFiles.files.join("\n"), diagnostics };
   }
   diagnostics.push(`rg unavailable or empty: ${formatCommandDiagnostic(rg)}`);
 
   const git = runFileListCommand("git", ["ls-files"], repoRoot);
-  if (git.files.length > 0) {
-    return { provider: "git", files: git.files, raw: git.stdout, diagnostics };
+  const gitFiles = filterRepoInventoryFiles(git.files);
+  if (gitFiles.files.length > 0) {
+    if (gitFiles.removed > 0) {
+      diagnostics.push(`inventory ignored generated/artifact paths: ${gitFiles.removed}`);
+    }
+    return { provider: "git", files: gitFiles.files, raw: gitFiles.files.join("\n"), diagnostics };
   }
   diagnostics.push(`git ls-files unavailable or empty: ${formatCommandDiagnostic(git)}`);
 
@@ -2407,6 +2415,19 @@ function collectRepoFiles(cwd: string, repoRoot: string): ProviderFileList {
     raw: node.files.join("\n"),
     diagnostics
   };
+}
+
+function filterRepoInventoryFiles(files: string[]): { files: string[]; removed: number } {
+  const filtered: string[] = [];
+  for (const file of files) {
+    const normalized = file.replace(/\\/g, "/");
+    const name = normalized.split("/").pop() || normalized;
+    if (shouldSkipInventoryFile(name, normalized)) {
+      continue;
+    }
+    filtered.push(normalized);
+  }
+  return { files: uniqueStrings(filtered), removed: files.length - filtered.length };
 }
 
 function runFileListCommand(command: string, args: string[], cwd: string): {
@@ -2490,6 +2511,8 @@ function shouldSkipInventoryDir(name: string, normalizedPath: string): boolean {
     ".nuxt",
     ".turbo",
     ".cache",
+    ".codegraph",
+    "benchmark-results",
     "target",
     "__pycache__",
     ".venv",
@@ -2497,7 +2520,7 @@ function shouldSkipInventoryDir(name: string, normalizedPath: string): boolean {
   ].includes(lower)) {
     return true;
   }
-  return /(^|\/)(dist|build|coverage|node_modules)(\/|$)/i.test(normalizedPath);
+  return isArtifactLikePath(normalizedPath) || /(^|\/)(dist|build|coverage|node_modules)(\/|$)/i.test(normalizedPath);
 }
 
 function shouldSkipInventoryFile(name: string, normalizedPath: string): boolean {
@@ -2505,7 +2528,12 @@ function shouldSkipInventoryFile(name: string, normalizedPath: string): boolean 
   if (lower.endsWith(".map") || lower.endsWith(".min.js") || lower.endsWith(".lock")) {
     return true;
   }
-  return /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|cargo\.lock|uv\.lock)$/i.test(normalizedPath);
+  return isArtifactLikePath(normalizedPath) || /(^|\/)(package-lock\.json|pnpm-lock\.yaml|yarn\.lock|bun\.lockb|cargo\.lock|uv\.lock)$/i.test(normalizedPath);
+}
+
+function isArtifactLikePath(normalizedPath: string): boolean {
+  return /(^|\/)(benchmark-results|\.codegraph)(\/|$)/i.test(normalizedPath) ||
+    /(^|\/)worktrees\//i.test(normalizedPath);
 }
 
 function formatCommandDiagnostic(result: { status: number | null; stderr: string; error?: string }): string {
@@ -4410,7 +4438,7 @@ function parseFlowSearchHits(rawOutput: string, term: string, repoRoot: string):
       continue;
     }
     const file = normalizeSearchHitPath(match[1]!, repoRoot);
-    if (!file || isProbablyBinaryPath(file) || /(^|\/)(node_modules|dist|build|target|\.git|vendor)\//i.test(file)) {
+    if (!file || isProbablyBinaryPath(file) || isArtifactLikePath(file) || /(^|\/)(node_modules|dist|build|target|\.git|vendor)\//i.test(file)) {
       continue;
     }
     hits.push({
@@ -4507,7 +4535,7 @@ function isTestFlowFile(filePath: string): boolean {
 }
 
 function isGeneratedFlowFile(filePath: string): boolean {
-  return /(^|\/)(generated|gen|target\/generated-sources|build\/generated|dist)\//i.test(filePath) || /\.gen\./i.test(filePath) || /(^|\/)typed-router\.d\.ts$/i.test(filePath);
+  return isArtifactLikePath(filePath) || /(^|\/)(generated|gen|target\/generated-sources|build\/generated|dist)\//i.test(filePath) || /\.gen\./i.test(filePath) || /(^|\/)typed-router\.d\.ts$/i.test(filePath);
 }
 
 function isEntrypointFlowFile(filePath: string): boolean {
@@ -5012,7 +5040,7 @@ function extractDomainTerms(text: string, paths: string[], limit: number): strin
 
 function extractMajorBusinessAreas(inventory: RepoInventory): string[] {
   return inventory.topDirs
-    .filter(([name]) => name !== "<root>" && !/^(?:\.github|\.idea|node_modules|dist|build|target|coverage)$/i.test(name))
+    .filter(([name]) => name !== "<root>" && !/^(?:\.github|\.idea|node_modules|dist|build|target|coverage|benchmark-results|\.codegraph)$/i.test(name))
     .slice(0, 10)
     .map(([name, count]) => `${name}:${count}`);
 }

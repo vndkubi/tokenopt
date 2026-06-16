@@ -750,6 +750,53 @@ test("mcp compiles business deep-dive evidence and gates grep fallback", async (
   );
 });
 
+test("mcp contextgate ignores benchmark worktree artifacts as source evidence", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-artifact-filter-repo-"));
+  fs.mkdirSync(path.join(repo, "src", "checkout"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "benchmark-results", "workflow-ab-noise", "worktrees", "baseline", "src", "checkout"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "checkout-platform", version: "1.0.0", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(repo, "README.md"),
+    [
+      "# Checkout Platform",
+      "",
+      "Checkout Platform helps merchants authorize payments and complete orders."
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "src", "checkout", "CheckoutService.ts"),
+    "export class CheckoutService { authorizePayment() { return true; } }\n"
+  );
+  fs.writeFileSync(
+    path.join(repo, "benchmark-results", "workflow-ab-noise", "worktrees", "baseline", "src", "checkout", "CheckoutService.ts"),
+    "export class NoisyBenchmarkArtifact { unrelated() { return false; } }\n"
+  );
+
+  await withTokenOptMcp(
+    async (client) => {
+      const packet = await client.callTool({
+        name: "contextgate_get_context",
+        arguments: {
+          task: "Deep dive checkout business behavior and source evidence.",
+          cwd: repo,
+          task_type: "research_business",
+          required_slots: ["source_files", "business_invariants", "risks"],
+          budget_tokens: 1200,
+          detail: "compact"
+        }
+      });
+      assert.equal(packet.isError ?? false, false);
+      assert.match(packet.content[0].text, /src\/checkout\/CheckoutService\.ts/);
+      assert.doesNotMatch(packet.content[0].text, /benchmark-results/);
+      assert.doesNotMatch(packet.content[0].text, /NoisyBenchmarkArtifact/);
+    },
+    { cwd: repo, env: { TOKENOPT_MCP_MODE: "broker" } }
+  );
+});
+
 test("mcp does not mark target-specific business task answerable without target evidence", async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-target-business-repo-"));
   fs.mkdirSync(path.join(repo, "src", "orders"), { recursive: true });

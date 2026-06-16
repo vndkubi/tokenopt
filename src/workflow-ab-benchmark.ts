@@ -950,6 +950,9 @@ function parseWorkflow(value: string): WorkflowMode {
   if (value === "baseline" || value === "tokenopt" || value === "speckit" || value === "speckit-tokenopt" || value === "tokenopt-prompt-chain") {
     return value;
   }
+  if (value === "speckit-only") {
+    return "speckit";
+  }
   throw new Error(`Unknown workflow: ${value}`);
 }
 
@@ -1045,7 +1048,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function workflowBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-tokenopt,tokenopt-prompt-chain] [--base-ref HEAD] [--test-command <command>] [--mcp-mode lite|full] [--validation-timeout-ms 300000] [--out <json>] [--markdown <md>] [--show-answers]
+  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-only,speckit-tokenopt,tokenopt-prompt-chain] [--base-ref HEAD] [--test-command <command>] [--mcp-mode lite|full] [--validation-timeout-ms 300000] [--out <json>] [--markdown <md>] [--show-answers]
 
 Feature JSON:
   {

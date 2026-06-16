@@ -10,6 +10,7 @@ type SuiteBenchmarkMode =
   | "codegraph"
   | "codegraph-only"
   | "tokenopt-codegraph"
+  | "tokenopt-codegraph-natural"
   | "tokenopt-codegraph-adaptive"
   | "tokenopt-codegraph-hybrid"
   | "contextgate-natural"
@@ -60,6 +61,7 @@ interface CodexRunMetrics {
   finalAnswer: string;
   routeMetadataText: string;
   usage: CodexUsage;
+  usageStatus: "available" | "missing" | "error";
   toolCalls: number;
   shellCalls: number;
   mcpCalls: number;
@@ -150,6 +152,7 @@ const ALL_SUITE_BENCHMARK_MODES: SuiteBenchmarkMode[] = [
   "codegraph",
   "codegraph-only",
   "tokenopt-codegraph",
+  "tokenopt-codegraph-natural",
   "tokenopt-codegraph-adaptive",
   "tokenopt-codegraph-hybrid",
   "contextgate-natural",
@@ -488,12 +491,17 @@ function runCodexSuiteBenchmark(
   }
 
   if (usesCodeGraph(mode, task)) {
+    const codeGraphEnv = { ...process.env };
+    if (options.prewarmCodeGraph) {
+      codeGraphEnv.TOKENOPT_CODEGRAPH_MCP_NO_PREWARM = "1";
+    }
+    if (mode !== "tokenopt-codegraph-natural" && !codeGraphEnv.TOKENOPT_CODEGRAPH_MCP_PROFILE) {
+      codeGraphEnv.TOKENOPT_CODEGRAPH_MCP_PROFILE = "full";
+    }
     const codegraph = buildCodeGraphMcpServerConfig(
       repo,
       inferTaskType(task),
-      options.prewarmCodeGraph
-        ? { ...process.env, TOKENOPT_CODEGRAPH_MCP_NO_PREWARM: "1" }
-        : process.env
+      codeGraphEnv
     );
     args.push(
       "-c",
@@ -503,7 +511,7 @@ function runCodexSuiteBenchmark(
     );
   }
   if (usesTokenOpt(mode, task)) {
-    const tokenOptMcpMode = mode === "contextgate-natural" ? "broker" : "lite";
+    const tokenOptMcpMode = mode === "contextgate-natural" || mode === "tokenopt-codegraph-natural" ? "broker" : "lite";
     args.push(
       "-c",
       "mcp_servers.tokenopt.command='node'",
@@ -540,6 +548,7 @@ function runCodexSuiteBenchmark(
     finalAnswer: fileAnswer || parsed.finalAnswer,
     routeMetadataText: parsed.routeMetadataText,
     usage: parsed.usage,
+    usageStatus: parsed.usageStatus,
     toolCalls: parsed.toolCalls,
     shellCalls: parsed.shellCalls,
     mcpCalls: parsed.mcpCalls,
@@ -842,6 +851,9 @@ export function adaptiveQualitySlicePlanForTask(task: Pick<SuiteTask, "id" | "cl
 function usesCodeGraph(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
   if (mode === "tokenopt-codegraph-adaptive") {
     return task ? adaptivePlanForSuiteTask(task).useCodeGraph : true;
+  }
+  if (mode === "tokenopt-codegraph-natural") {
+    return true;
   }
   if (mode === "contextgate-natural") {
     return false;
@@ -1186,7 +1198,7 @@ function tokenOptCodeGraphPlanLines(
     options.adaptiveQuality
       ? "- Use TokenOpt as the quality gate and CodeGraph as a bounded quality evidence escalator."
       : options.adaptiveCompact
-      ? "- Use TokenOpt as the single quality broker and CodeGraph as its compact evidence provider."
+        ? "- Use TokenOpt as the single quality broker and CodeGraph as its compact evidence provider."
       : "- Use TokenOpt as the quality passport and CodeGraph as the evidence provider.",
     `- First call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, budget_tokens=${tokenOptBudget}, quality_rubric=${qualityRubricJson}, and task set to only the original Daily task text above.`,
     `- Treat the TokenOpt packet as a slot checklist, not as sufficient final evidence. Required slots: ${requiredSlots}.`,
@@ -1224,9 +1236,102 @@ function tokenOptCodeGraphPlanLines(
   ];
 }
 
+function naturalTokenOptCodeGraphPlanLines(
+  task: SuiteTask,
+  route: ReturnType<typeof routeTask>,
+  taskType: EvidenceTaskType,
+  packetTokens: number,
+  qualityRubricJson: string
+): string[] {
+  const requiredSlots = naturalEvidenceSlotsForTask(task, taskType);
+  const evidenceIntent = naturalEvidenceIntentForTask(task);
+  const explicitTarget = hasConcreteTargetHint(task);
+  if (route.taskClass === "needs_input_bypass") {
+    return [
+      buildNaturalTokenOptCodeGraphPolicy(task, route),
+      "- Ask for the missing artifact before repository exploration.",
+      "- Do not infer repo-specific evidence from a missing diff, ticket, attachment, failing test, or requirement body.",
+      "- Return the requested JSON shape with the missing artifact and next question represented as a risk, unknown, or next step.",
+      "- Stop after that answer."
+    ];
+  }
+
+  return [
+    buildNaturalTokenOptCodeGraphPolicy(task, route),
+    "- Treat this as a normal developer request. The user's prompt, repository instructions, and any active agent instructions remain authoritative.",
+    `- Evidence intent for context acquisition only: ${JSON.stringify(evidenceIntent)}. Use this semantic code question for context lookup inputs; keep the original user prompt for the final output shape.`,
+    "- Do not pass output-schema boilerplate, JSON key names, benchmark harness text, or generic words like return/valid/compact as retrieval intent.",
+    `- Required evidence slots before final answer: ${requiredSlots.join(", ")}.`,
+    `- Quality rubric to keep in mind: ${qualityRubricJson}.`,
+    `- For broad or unknown-owner tasks, a compact context packet around ${packetTokens} tokens is usually the cheapest first step when available.`,
+    explicitTarget
+      ? "- Because the task already names concrete targets, prefer exact bounded source or graph lookups before broad context gathering."
+      : "- Because the task is broad, use one compact discovery step before exact source or graph followups.",
+    "- Choose the next action by the missing evidence slot, not by a fixed tool script.",
+    "- Hard budget: use at most 3 context/source tool calls total. For exact-target or small CLI/code-reading tasks, aim for 1-2 total calls.",
+    "- Do not call a source-slice style tool with only a file path and no line range, symbol, or bounded slice hint; failed or unbounded calls still count against the budget.",
+    "- If the first evidence pass covers the required slots well enough, answer from it and stop.",
+    "- If one important slot is still weak, make one focused bounded followup for that named file, symbol, route, test, business rule, or attachment.",
+    "- If quality still depends on graph/source structure, make at most one final structured source followup and then stop.",
+    "- Avoid iterative low-level expansion; do not walk command surfaces, file trees, or symbol neighbors beyond the slots required by the prompt.",
+    "- Do not spend a separate call only to find a project overview or README when source, package, or context evidence already supports a concise summary.",
+    "- Do not duplicate evidence through another provider when the current slices already cover the same files or symbols.",
+    "- Shell fallback is disabled in this benchmark mode; unresolved coverage must be stated in the requested JSON shape.",
+    "- Use flat strings and short arrays unless the user explicitly requested nested objects.",
+    "- Keep the final output compact, syntactically valid JSON, and preserve the requested output contract exactly."
+  ];
+}
+
+function hasConcreteTargetHint(task: Pick<SuiteTask, "id" | "class" | "prompt">): boolean {
+  const text = `${task.id} ${task.class} ${task.prompt}`;
+  const hasFileToken = /\b[a-z0-9_./-]+\.(?:ts|tsx|js|jsx|java|py|go|rs|kt|scala)\b/i.test(text);
+  const hasQuotedIdent = /`[^`\n]{3,}`/.test(text);
+  const hasSymbolHint = /\b[a-z][a-z0-9_]{2,}\.(?:[a-z_][a-z0-9_]*)\b/i.test(text);
+  const hasNamedOwner = /\b[a-z]*[A-Z][a-z0-9_]*(?:controller|service|repository|component|handler|facade|workflow|mapper|entity|dto|page|task|test|spec)\b/i.test(text);
+  return hasFileToken || hasQuotedIdent || hasSymbolHint || hasNamedOwner;
+}
+
+function naturalEvidenceIntentForTask(task: Pick<SuiteTask, "id" | "class" | "prompt">): string {
+  let intent = task.prompt.trim();
+  intent = intent.replace(/^return\s+valid\s+compact\s+json\s+only\s+with\s+keys\s+[^.?!]+[.?!]\s*/i, "");
+  intent = intent.replace(/^return\s+compact\s+json\s+only\s+with\s+keys\s+[^.?!]+[.?!]\s*/i, "");
+  intent = intent.replace(/^return\s+valid\s+json\s+only\s+with\s+keys\s+[^.?!]+[.?!]\s*/i, "");
+  intent = intent.replace(/^return\s+json\s+only\s+with\s+keys\s+[^.?!]+[.?!]\s*/i, "");
+  intent = intent.replace(/\b(?:command_list|setup_flow|quality_focus|output_shape|files|symbols|risks|tests_to_run)\b/gi, " ");
+  intent = intent.replace(/\b(?:valid|compact|json|only|keys|key|single|object|array|string|strings)\b/gi, " ");
+  intent = intent.replace(/\s+/g, " ").trim();
+  if (!intent) {
+    intent = `${task.class} ${task.id}`.replace(/[-_]/g, " ");
+  }
+  return intent.slice(0, 500);
+}
+
+function buildNaturalTokenOptCodeGraphPolicy(task: SuiteTask, route: ReturnType<typeof routeTask>): string {
+  const explicitTarget = hasConcreteTargetHint(task);
+  if (route.taskClass === "needs_input_bypass") {
+    return "- Route policy: needs_input_bypass. Ask for the required missing artifact or diff before doing any repository exploration.";
+  }
+  if (route.taskClass === "exact_symbol" || route.taskClass === "small_repo_bypass") {
+    return "- Route policy: exact-target. Start from the named file, symbol, route, or failing case; avoid broad context gathers.";
+  }
+  if (route.taskClass === "review_diff") {
+    return "- Route policy: review-focused. Start from the provided diff, PR, attachment, or review scope; use bounded followup only for missing changed symbols, callers, business rules, or tests.";
+  }
+  if (route.taskClass === "coding_coverage") {
+    return "- Route policy: coding evidence. Require owner files, symbols, tests, validation, and business behavior coverage before treating the answer as complete.";
+  }
+  const policy = explicitTarget
+    ? "- Route policy: targeted-by-default. Task text already names likely concrete symbols/files, so resolve those before any wider discovery."
+    : "- Route policy: context-first. This is broad discovery; use one compact context/gap check, then bounded exact followup only for missing evidence.";
+  return `${policy} Router reason: ${route.reason}`;
+}
+
 function naturalEvidenceSlotsForTask(task: Pick<SuiteTask, "class" | "prompt">, taskType: EvidenceTaskType): string[] {
   const idClassPrompt = `${task.class} ${task.prompt}`.toLowerCase();
-  const slots = new Set<string>(["source_files", "symbols", "existing_tests", "risks"]);
+  const slots = new Set<string>(["source_files", "symbols", "risks"]);
+  if (naturalTaskWantsTestEvidence(task, taskType)) {
+    slots.add("existing_tests");
+  }
   if (taskType === "review_diff") {
     return ["changed_files", "changed_symbols", "findings", "tests_or_validation", "compatibility_risks"];
   }
@@ -1251,6 +1356,13 @@ function naturalEvidenceSlotsForTask(task: Pick<SuiteTask, "class" | "prompt">, 
     slots.add("validation_commands");
   }
   return [...slots];
+}
+
+function naturalTaskWantsTestEvidence(task: Pick<SuiteTask, "class" | "prompt">, taskType: EvidenceTaskType): boolean {
+  if (taskType === "implement" || taskType === "write_unittest" || taskType === "review_diff") {
+    return true;
+  }
+  return /\b(?:test|tests|testing|unittest|unit-test|coverage|validation|validate|regression|acceptance criteria)\b/i.test(`${task.class} ${task.prompt}`);
 }
 
 function naturalContextBrokerPlanLines(
@@ -1288,30 +1400,44 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
     ? JSON.stringify(task.qualityRubric)
     : "[\"files\", \"symbols\", \"tests\", \"risks\", \"validation\"]";
   const common = [
-    task.prompt,
-    "",
     "Benchmark constraints:",
     "- Preserve the requested output format exactly.",
     "- Cite repository-relative files when the task asks for citations.",
     "- Do not modify files.",
+    "- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.",
     `- Repository root: ${repo}`
   ];
 
+  const buildPrompt = (sections: string[]): string => [
+    "Task (do not rephrase):",
+    task.prompt,
+    "",
+    ...common,
+    "",
+    ...sections
+  ].join("\n");
+
   if (mode === "baseline") {
-    return [
-      ...common,
+    return buildPrompt([
       "- Use normal Codex CLI tools if needed. Keep exploration bounded, but gather enough evidence for a correct answer."
-    ].join("\n");
+    ]);
   }
 
   if (mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-hybrid") {
-    return [
-      ...common,
+    return buildPrompt([
       ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, codeGraphBudgetTokens, codeGraphRubric, anchorQuery, gapRefillQuery, {
         hybridFallback: mode === "tokenopt-codegraph-hybrid"
       }),
       "- Preserve the requested JSON contract exactly."
-    ].join("\n");
+    ]);
+  }
+
+  if (mode === "tokenopt-codegraph-natural") {
+    const route = routeTask({ task: task.prompt, requestedTaskType: taskType });
+    return buildPrompt([
+      ...naturalTokenOptCodeGraphPlanLines(task, route, taskType, packetTokens, codeGraphRubric),
+      "- Preserve requested output format exactly."
+    ]);
   }
 
   if (mode === "tokenopt-codegraph-adaptive") {
@@ -1320,8 +1446,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       ? adaptiveQualitySlicePlanForTask(task)
       : undefined;
     if (!adaptivePlan.useCodeGraph) {
-      return [
-        ...common,
+      return buildPrompt([
         `- Adaptive policy: ${adaptivePlan.strategy}. ${adaptivePlan.reason}`,
         "- Use TokenOpt as the single evidence broker. Do not call CodeGraph for this task family.",
         `- Call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, and budget_tokens around ${packetTokens}.`,
@@ -1332,10 +1457,9 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
         "- If answerable=false, use at most one exact TokenOpt search/read followup named by the packet for a missing changed method, source file, or test.",
         "- Shell/read fallback and CodeGraph fallback are disabled in adaptive mode for this task family.",
         "- Final output must be a syntactically valid compact single JSON object under 5000 characters. Preserve the requested JSON contract exactly."
-      ].join("\n");
+      ]);
     }
-    return [
-      ...common,
+    return buildPrompt([
       `- Adaptive policy: ${adaptivePlan.strategy}. ${adaptivePlan.reason}`,
       ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, adaptivePlan.strategy === "tokenopt-codegraph-quality"
         ? adaptiveQualityCodeGraphBudgetForTask(taskType)
@@ -1346,20 +1470,18 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
         qualitySlicePlan
       }),
       "- Preserve the requested JSON contract exactly."
-    ].join("\n");
+    ]);
   }
 
   if (mode === "contextgate-natural") {
-    return [
-      ...common,
+    return buildPrompt([
       ...naturalContextBrokerPlanLines(repo, task, taskType, packetTokens, codeGraphRubric),
       "- Preserve the requested JSON contract exactly."
-    ].join("\n");
+    ]);
   }
 
   if (mode === "codegraph" || mode === "codegraph-only") {
-    return [
-      ...common,
+    return buildPrompt([
       "- Use CodeGraph MCP v2 as the primary code acquisition path.",
       "- When calling any CodeGraph MCP tool, pass task/target as only the original Daily task text above. Do not include this Benchmark constraints section, repository root line, output wrapper instructions, or CodeGraph tool instructions in the MCP arguments.",
       ...codeGraphToolPlanLines(taskType, codeGraphBudgetTokens, codeGraphRubric, anchorQuery, gapRefillQuery),
@@ -1372,7 +1494,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
         ? "- Shell/read fallback is disabled. Use only CodeGraph MCP evidence and mark unresolved risks explicitly when coverage is incomplete."
         : "- Shell/read fallback is allowed only if compile_evidence recommends targeted_shell or the single exact CodeGraph followup still cannot cover a required item.",
       "- Preserve the requested JSON contract. Include unresolved risks when evidence is incomplete."
-    ].join("\n");
+    ]);
   }
 
   const taskArgumentLine = taskType === "review_diff"
@@ -1386,8 +1508,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       taskType === "review_diff"
         ? "review_diff -> use tokenopt_compile_evidence only when the diff is concrete enough to replace exploration; if answerable=true, answer from the packet with zero followups; if answerable=false, use at most one exact TokenOpt search/read pair for the changed method and likely tests."
         : `${taskType} -> shell disabled; use tokenopt_compile_evidence first, then exact TokenOpt search/read followups only for missing named files, routes, symbols, or tests.`;
-    return [
-      ...common,
+    return buildPrompt([
       "- TokenOpt router selected strict acquisition for this task.",
       `- Router plan: ${routerPlan}`,
       `- Call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, and budget_tokens around ${packetTokens}.`,
@@ -1395,15 +1516,14 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       carryPacketEvidenceLine,
       "- Preserve the requested JSON contract. Do not call shell; it is disabled in this benchmark mode.",
       "- If evidence is still incomplete after the allowed exact followups, return the best supported answer and mark unresolved risks explicitly."
-    ].join("\n");
+    ]);
   }
   if (mode === "router-best") {
     const deterministicReview = hasDeterministicReviewSupport(task);
     const route = routeTask({ task: task.prompt, requestedTaskType: taskType });
     if (route.taskClass === "needs_input_bypass") {
       const useMcpPacket = shouldUseMcpForMissingArtifact(task);
-      return [
-        ...common,
+      return buildPrompt([
         `- TokenOpt router selected acquisition_mode=${route.acquisitionMode} and evidence_contract=${route.evidenceContract}.`,
         `- Router plan: ${route.reason}`,
         useMcpPacket
@@ -1413,11 +1533,10 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
         useMcpPacket ? carryPacketEvidenceLine : undefined,
         "- Do not call shell; it is disabled because no concrete artifact was provided.",
         "- Preserve the requested JSON contract. Return a bounded answer that explicitly asks for the missing artifact and does not invent repo-specific evidence."
-      ].filter((line): line is string => line !== undefined).join("\n");
+      ].filter((line): line is string => line !== undefined));
     }
     if (route.taskClass === "security_audit") {
-      return [
-        ...common,
+      return buildPrompt([
         `- TokenOpt router selected acquisition_mode=${route.acquisitionMode} and evidence_contract=${route.evidenceContract}.`,
         `- Router plan: ${route.reason}`,
         `- Call tokenopt_compile_evidence with cwd=${repo}, task_type=review_diff, and budget_tokens around ${packetTokens}.`,
@@ -1425,7 +1544,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
         carryPacketEvidenceLine,
         "- Do not call shell; security findings require concrete diff/scope coverage first.",
         "- If the packet recommends ask_user, return JSON that states the missing scope and does not invent findings."
-      ].join("\n");
+      ]);
     }
     const routerPlan =
       taskType === "review_diff" && !deterministicReview
@@ -1437,8 +1556,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       taskType === "review_diff" && !deterministicReview
         ? "- Do not call shell; ask for a concrete diff, changed files, PR, or target before review exploration."
         : "- Do not call shell; it is disabled in this benchmark mode for this task.";
-    return [
-      ...common,
+    return buildPrompt([
       `- TokenOpt router selected acquisition_mode=${route.acquisitionMode} and evidence_contract=${route.evidenceContract}.`,
       `- Router plan: ${routerPlan}`,
       deterministicReview || taskType !== "review_diff"
@@ -1448,7 +1566,7 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       carryPacketEvidenceLine,
       shellPolicy,
       "- Preserve the requested JSON contract. Include unresolved risks when evidence is incomplete."
-    ].join("\n");
+    ]);
   }
 
   const hardGateLine =
@@ -1460,15 +1578,14 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
       ? "- Shell fallback is allowed only after TokenOpt exact search/read cannot cover a required missing item."
       : "- Shell is disabled for this benchmark mode; use only TokenOpt MCP tools and state any unresolved evidence honestly.";
 
-  return [
-    ...common,
+  return buildPrompt([
     "- Use the TokenOpt MCP tool tokenopt_compile_evidence first.",
     `- Call it with cwd=${repo}, task_type=${taskType}, and budget_tokens around ${packetTokens}.`,
     taskArgumentLine,
     carryPacketEvidenceLine,
     hardGateLine,
     shellLine
-  ].join("\n");
+  ]);
 }
 
 function inferTaskType(task: Pick<SuiteTask, "id" | "class" | "prompt">): EvidenceTaskType {
@@ -1696,6 +1813,7 @@ function parseCodexJsonl(text: string): {
   finalAnswer: string;
   routeMetadataText: string;
   usage: CodexUsage;
+  usageStatus: "available" | "missing" | "error";
   toolCalls: number;
   shellCalls: number;
   mcpCalls: number;
@@ -1712,6 +1830,7 @@ function parseCodexJsonl(text: string): {
   let toolInputChars = 0;
   let toolOutputChars = 0;
   let warnings = 0;
+  let usageStatus: "available" | "missing" | "error" = "missing";
 
   for (const line of text.split(/\r?\n/)) {
     const trimmed = line.trim();
@@ -1741,6 +1860,11 @@ function parseCodexJsonl(text: string): {
         output_tokens: numberValue(event.usage.output_tokens),
         reasoning_output_tokens: numberValue(event.usage.reasoning_output_tokens)
       };
+      usageStatus = "available";
+    }
+
+    if (event.type === "turn.failed") {
+      usageStatus = "error";
     }
 
     if (event.type === "item.completed" && isRecord(event.item)) {
@@ -1755,11 +1879,13 @@ function parseCodexJsonl(text: string): {
         toolOutputChars += typeof item.aggregated_output === "string" ? item.aggregated_output.length : 0;
       }
       if (item.type === "mcp_tool_call") {
-        toolCalls += 1;
-        mcpCalls += 1;
-        toolInputChars += JSON.stringify(item.arguments ?? {}).length;
-        toolOutputChars += JSON.stringify(item.result ?? item.error ?? {}).length;
-        routeMetadataLines.push(...extractMcpRouteMetadataLines(item.result));
+        if (!isHostMcpDiscoveryCall(item)) {
+          toolCalls += 1;
+          mcpCalls += 1;
+          toolInputChars += JSON.stringify(item.arguments ?? {}).length;
+          toolOutputChars += JSON.stringify(item.result ?? item.error ?? {}).length;
+          routeMetadataLines.push(...extractMcpRouteMetadataLines(item.result));
+        }
       }
     }
   }
@@ -1768,6 +1894,7 @@ function parseCodexJsonl(text: string): {
     finalAnswer,
     routeMetadataText: uniqueStrings(routeMetadataLines).join("\n"),
     usage,
+    usageStatus,
     toolCalls,
     shellCalls,
     mcpCalls,
@@ -1775,6 +1902,13 @@ function parseCodexJsonl(text: string): {
     toolOutputChars,
     warnings
   };
+}
+
+function isHostMcpDiscoveryCall(item: Record<string, unknown>): boolean {
+  return item.server === "codex" && (
+    item.tool === "list_mcp_resources" ||
+    item.tool === "list_mcp_resource_templates"
+  );
 }
 
 export function buildSuiteRouteMetadata(
@@ -1948,6 +2082,7 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     "Acq",
     "Contract",
     "Contract ok",
+    "Usage",
     "Double",
     "Quality",
     "Checks",
@@ -1978,6 +2113,7 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     row.acquisitionMode,
     row.evidenceContract,
     row.evidenceContractPass ? "yes" : "no",
+    row.usageStatus,
     row.doubleSpend ? "yes" : "no",
     row.qualityScore.toFixed(3),
     row.qualityChecks,
@@ -2150,11 +2286,14 @@ function summaryHeader(): string[] {
     "JSON",
     "Input tok",
     "Cached tok",
-    "Delta vs baseline",
+    "Input delta",
     "Output tok",
+    "Output delta",
+    "Reason delta",
     "Reason tok",
     "Raw tok",
     "Fresh tok",
+    "Quality delta",
     "Q/10k fresh",
     "Tool",
     "MCP",
@@ -2166,9 +2305,10 @@ function summaryHeader(): string[] {
 
 function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string[] {
   const baseline = rows.find((candidate) => candidate.repo === row.repo && candidate.taskId === row.taskId && candidate.mode === "baseline");
-  const delta = baseline && baseline.usage.input_tokens > 0 && row.mode !== "baseline"
-    ? `${((1 - row.usage.input_tokens / baseline.usage.input_tokens) * 100).toFixed(1)}%`
-    : "";
+  const inputDelta = formatSavingsPercent(row.usage.input_tokens, baseline?.usage.input_tokens);
+  const outputDelta = formatSavingsPercent(row.usage.output_tokens, baseline?.usage.output_tokens);
+  const reasonDelta = formatSavingsPercent(row.usage.reasoning_output_tokens, baseline?.usage.reasoning_output_tokens);
+  const qualityDelta = formatQualityDelta(row.qualityScore, baseline?.qualityScore);
   return [
     path.basename(row.repo),
     row.taskId,
@@ -2184,11 +2324,14 @@ function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string
     row.jsonValid ? "yes" : "no",
     String(row.usage.input_tokens),
     String(row.usage.cached_input_tokens),
-    delta,
+    inputDelta,
     String(row.usage.output_tokens),
+    outputDelta,
+    reasonDelta,
     String(row.usage.reasoning_output_tokens),
     String(rawUsageTokens(row.usage)),
     String(freshUsageTokens(row.usage)),
+    qualityDelta,
     qualityPer10kFresh(row).toFixed(3),
     String(row.toolCalls),
     String(row.mcpCalls),
@@ -2196,6 +2339,24 @@ function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string
     String(row.toolOutputChars),
     String(row.durationMs)
   ];
+}
+
+function formatSavingsPercent(value: number, baseline?: number): string {
+  if (!baseline || baseline <= 0) {
+    return "";
+  }
+  const saved = 1 - value / baseline;
+  const direction = saved >= 0 ? "saved" : "spent";
+  return `${direction} ${Math.abs(saved * 100).toFixed(1)}%`;
+}
+
+function formatQualityDelta(value: number, baseline?: number): string {
+  if (baseline === undefined) {
+    return "";
+  }
+  const delta = value - baseline;
+  const sign = delta > 0 ? "+" : delta < 0 ? "-" : "";
+  return `${sign}${delta.toFixed(3)}`;
 }
 
 function aggregateRows(rows: SuiteBenchmarkRow[]): string[][] {
@@ -2327,6 +2488,7 @@ function parseMode(value: string): SuiteBenchmarkMode {
     value === "codegraph" ||
     value === "codegraph-only" ||
     value === "tokenopt-codegraph" ||
+    value === "tokenopt-codegraph-natural" ||
     value === "tokenopt-codegraph-adaptive" ||
     value === "tokenopt-codegraph-hybrid" ||
     value === "contextgate-natural" ||
@@ -2347,10 +2509,13 @@ function parseMode(value: string): SuiteBenchmarkMode {
   if (value === "tokenopt+codegraph" || value === "combined") {
     return "tokenopt-codegraph";
   }
+  if (value === "tokenopt+codegraph-natural" || value === "combined-natural" || value === "natural-combined") {
+    return "tokenopt-codegraph-natural";
+  }
   if (value === "tokenopt+codegraph-adaptive" || value === "adaptive" || value === "combined-adaptive") {
     return "tokenopt-codegraph-adaptive";
   }
-  if (value === "natural" || value === "contextgate" || value === "contextgate-adaptive") {
+  if (value === "natural" || value === "contextgate" || value === "contextgate-adaptive" || value === "contextgate-natural-lite") {
     return "contextgate-natural";
   }
   if (value === "tokenopt+codegraph-hybrid" || value === "combined-hybrid" || value === "hybrid-codegraph") {
@@ -2545,7 +2710,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function suiteBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|codegraph|codegraph-only|tokenopt-codegraph|tokenopt-codegraph-adaptive|tokenopt-codegraph-hybrid|contextgate-natural|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--prewarm-codegraph] [--json] [--show-answers]
+  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|codegraph|codegraph-only|tokenopt-only|tokenopt-codegraph|tokenopt-codegraph-natural|tokenopt-codegraph-adaptive|tokenopt-codegraph-hybrid|natural|contextgate|contextgate-natural|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--prewarm-codegraph] [--json] [--show-answers]
 
 Notes:
   - Tasks are matched by suite task.project against the repo directory name.
@@ -2554,8 +2719,9 @@ Notes:
   - Without env overrides, codegraph mode auto-detects sibling ../code-graph/dist/cli.js before falling back to codegraph on PATH.
   - codegraph-only injects CodeGraph MCP and disables shell_tool.
   - tokenopt-codegraph injects TokenOpt and CodeGraph MCP, disables shell_tool, and measures evidence-grounded idea quality.
+  - tokenopt-codegraph-natural injects the TokenOpt broker plus CodeGraph MCP, disables shell_tool, and uses route-aware tool-agnostic guidance with a hard bounded context/source call budget.
   - tokenopt-codegraph-adaptive uses one evidence-broker policy: TokenOpt-only for review/security/missing-artifact tasks, compact TokenOpt+CodeGraph for flow/implement/refactor tasks, and disables shell_tool.
-  - contextgate-natural injects only the ContextGate broker; low-level TokenOpt search/read and CodeGraph are not exposed directly to the agent.
+  - natural/contextgate/contextgate-natural/contextgate-adaptive injects only the ContextGate broker; low-level TokenOpt search/read and CodeGraph are not exposed directly to the agent.
   - tokenopt-codegraph-hybrid injects TokenOpt and CodeGraph MCP, then allows a bounded exact rg/slice fallback only when CodeGraph is unavailable or missing required slots.
   - --prewarm-codegraph runs codegraph index once per selected repo before Codex runs and adds --no-prewarm to per-run MCP servers.
   - mcp-first injects TokenOpt MCP and allows shell fallback only after exact TokenOpt followups.
@@ -2569,7 +2735,7 @@ function shouldDisableShell(mode: SuiteBenchmarkMode, task: SuiteTask): boolean 
   if (mode === "tokenopt-codegraph-adaptive" || mode === "contextgate-natural") {
     return adaptivePlanForSuiteTask(task).disableShell;
   }
-  if (mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "mcp-only" || mode === "compiled-hard-gate" || mode === "router-strict") {
+  if (mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-natural" || mode === "mcp-only" || mode === "compiled-hard-gate" || mode === "router-strict") {
     return true;
   }
   if (mode !== "router-best") {

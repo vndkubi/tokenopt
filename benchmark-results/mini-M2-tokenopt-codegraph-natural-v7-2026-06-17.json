@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-06-16T22:48:37.955Z",
+  "runner": "codex exec --json",
+  "codexPackage": "@openai/codex@0.137.0",
+  "suite": {
+    "path": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\mini-tokenopt-comparison-suite.json",
+    "name": "mini-tokenopt-natural-comparison",
+    "version": "2026-06-16",
+    "purpose": "Controlled mini suite to compare baseline/mcp/codegraph/hybrid token economics on same prompts."
+  },
+  "codegraph": {
+    "prewarm": false,
+    "prewarmTimeoutMs": 1800000
+  },
+  "modes": [
+    "tokenopt-codegraph-natural"
+  ],
+  "skippedRepos": [],
+  "rows": [
+    {
+      "exitCode": 0,
+      "durationMs": 49671,
+      "finalAnswer": "{\n  \"command_list\": [\n    \"Benchmark mode input is selected in `parseOptions()` with default `modes = [\\\"baseline\\\", \\\"mcp-first\\\"]`, `--mode all` expanding to `ALL_SUITE_BENCHMARK_MODES`, and CSV parsing via `parseMode` for custom mode sets. [src/suite-benchmark.ts:253-257, 283-290, 150-164]\",\n    \"Execution flow is per `(task, mode)` in `runSuiteBenchmarkCommand`, so every selected mode is exercised independently for each benchmark task. [src/suite-benchmark.ts:172-183, 181-183]\",\n    \"MCP wiring is injected in `runCodexSuiteBenchmark()` based on `usesCodeGraph(mode, task)` and `usesTokenOpt(mode, task)` and passed as `-c mcp_servers.codegraph.*` and/or `-c mcp_servers.tokenopt.*` flags to `npx ... exec --json`. [src/suite-benchmark.ts:464-516, 846-863]\"\n  ],\n  \"setup_flow\": \"Today, benchmark mode selection is done first (CLI/options), then mode application happens in the runner. `runSuiteBenchmarkCommand` builds `modes` from flags and iterates each mode for each selected task; runtime attachment is determined by `usesCodeGraph`/`usesTokenOpt` checks. [src/suite-benchmark.ts:172-183,253-287,846-863] CodeGraph configuration is itself selected by `buildCodeGraphMcpServerConfig()` (env/CLI/root/profile override + task profile fallback) and used only when `usesCodeGraph` is true. [src/suite-benchmark.ts:558-607,622-630,493-506] TokenOpt MCP mode is `lite` by default and `broker` only for `contextgate-natural` and `tokenopt-codegraph-natural`. [src/suite-benchmark.ts:509,508-516] Prewarm is optional and only triggered if a selected mode requires CodeGraph. [src/suite-benchmark.ts:870-877] Risks to cite: a prewarm failure throws and aborts benchmark execution. [src/suite-benchmark.ts:893-896]\",\n  \"quality_focus\": [\n    \"baseline: cheapest, lowest extra signal; neither TokenOpt nor CodeGraph MCP is attached, so signal is primarily base model + prompt. [src/suite-benchmark.ts:856-864]\",\n    \"codegraph / codegraph-only: adds CodeGraph-only evidence (`usesCodeGraph` true, `usesTokenOpt` false), trading higher tool/token overhead for repository-structure/context signal and index/prewarm cost. [src/suite-benchmark.ts:846-857,493-507,870-899]\",\n    \"tokenopt-codegraph / tokenopt-codegraph-natural / tokenopt-codegraph-hybrid: adds both MCP paths (TokenOpt + CodeGraph), highest signal density and highest MCP/tool cost in this harness; adaptive variants still depend on task-driven plan for some gates. [src/suite-benchmark.ts:846-857,493-507,693-714]\",\n    \"mcp-first / mcp-only / contextgate-natural / compiled-hard-gate / router-strict / router-best: today these are TokenOpt-backed (no CodeGraph in this layer), so cost is lower than dual-stack modes but higher than baseline, with contextgate-natural explicitly requesting `broker` mode. [src/suite-benchmark.ts:8-21,846-863,509]\",\n    \"control dial: signal/cost is further tuned by adaptive budgets: `adaptiveCodeGraphBudgetForTask`/`adaptiveQualityCodeGraphBudgetForTask` increase requested graph token budget for tougher task classes (e.g., review_diff 4000, implement 6000, quality floor 7000/9000 for some flows). [src/suite-benchmark.ts:642-663,1342,1344-1355]\"\n  ],\n  \"output_shape\": \"JSON object with exactly four top-level keys: `command_list`, `setup_flow`, `quality_focus`, `output_shape`; primary repository file is `src/suite-benchmark.ts`, and key symbols are `SuiteBenchmarkMode`, `parseOptions`, `runSuiteBenchmarkCommand`, `runCodexSuiteBenchmark`, `usesCodeGraph`, `usesTokenOpt`, `buildCodeGraphMcpServerConfig`, `adaptivePlanForSuiteTask`, `prewarmCodeGraphIfRequested`, `adaptiveCodeGraphBudgetForTask`. Validation command pattern is the `npx` exec assembled in `runCodexSuiteBenchmark` (`exec --json --ephemeral --skip-git-repo-check -C <repo> ... -` with optional MCP config flags). [src/suite-benchmark.ts:1-21,150-164,253-387,464-531,846-877]\"\n}",
+      "routeMetadataText": "",
+      "usage": {
+        "input_tokens": 117659,
+        "cached_input_tokens": 87936,
+        "output_tokens": 13585,
+        "reasoning_output_tokens": 12008
+      },
+      "usageStatus": "available",
+      "toolCalls": 3,
+      "shellCalls": 0,
+      "mcpCalls": 3,
+      "toolInputChars": 921,
+      "toolOutputChars": 71166,
+      "warnings": 98,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-M2-tokenopt-codegraph-natural-v7-2026-06-17\\tokenopt-M2-benchmark-modes-tokenopt-codegraph-natural.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-M2-tokenopt-codegraph-natural-v7-2026-06-17\\tokenopt-M2-benchmark-modes-tokenopt-codegraph-natural-last.txt",
+      "repo": "D:\\Personal\\Projects\\tokenopt",
+      "project": "tokenopt",
+      "taskId": "M2-benchmark-modes",
+      "taskClass": "investigate",
+      "acquisitionMode": "compile_evidence",
+      "evidenceContract": "overview_contract",
+      "evidenceContractPass": false,
+      "fallbackReason": "",
+      "doubleSpend": false,
+      "mode": "tokenopt-codegraph-natural",
+      "prompt": "Return valid compact JSON only with keys command_list, setup_flow, quality_focus, output_shape. Explain how benchmark, mcp, and codegraph modes are selected today and what each mode should buy as signal/cost tradeoff.",
+      "codexPrompt": "Task (do not rephrase):\nReturn valid compact JSON only with keys command_list, setup_flow, quality_focus, output_shape. Explain how benchmark, mcp, and codegraph modes are selected today and what each mode should buy as signal/cost tradeoff.\n\nBenchmark constraints:\n- Preserve the requested output format exactly.\n- Cite repository-relative files when the task asks for citations.\n- Do not modify files.\n- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.\n- Repository root: D:\\Personal\\Projects\\tokenopt\n\n- Route policy: context-first. This is broad discovery; use one compact context/gap check, then bounded exact followup only for missing evidence. Router reason: Prompt needs broad repository context; compile a compact evidence packet before further exploration.\n- Treat this as a normal developer request. The user's prompt, repository instructions, and any active agent instructions remain authoritative.\n- Evidence intent for context acquisition only: \"Explain how benchmark, mcp, and codegraph modes are selected today and what each mode should buy as signal/cost tradeoff.\". Use this semantic code question for context lookup inputs; keep the original user prompt for the final output shape.\n- Do not pass output-schema boilerplate, JSON key names, benchmark harness text, or generic words like return/valid/compact as retrieval intent.\n- Required evidence slots before final answer: source_files, symbols, risks, entrypoint_or_owner, flow, validation_commands.\n- Quality rubric to keep in mind: [\"maps tradeoff between token cost and signal\",\"covers benchmark and mcp selection\",\"mentions output shape\",\"contains valid compact JSON\"].\n- For broad or unknown-owner tasks, a compact context packet around 1200 tokens is usually the cheapest first step when available.\n- Because the task is broad, use one compact discovery step before exact source or graph followups.\n- Choose the next action by the missing evidence slot, not by a fixed tool script.\n- Hard budget: use at most 3 context/source tool calls total. For exact-target or small CLI/code-reading tasks, aim for 1-2 total calls.\n- Do not call a source-slice style tool with only a file path and no line range, symbol, or bounded slice hint; failed or unbounded calls still count against the budget.\n- If the first evidence pass covers the required slots well enough, answer from it and stop.\n- If one important slot is still weak, make one focused bounded followup for that named file, symbol, route, test, business rule, or attachment.\n- If quality still depends on graph/source structure, make at most one final structured source followup and then stop.\n- Avoid iterative low-level expansion; do not walk command surfaces, file trees, or symbol neighbors beyond the slots required by the prompt.\n- Do not spend a separate call only to find a project overview or README when source, package, or context evidence already supports a concise summary.\n- Do not duplicate evidence through another provider when the current slices already cover the same files or symbols.\n- Shell fallback is disabled in this benchmark mode; unresolved coverage must be stated in the requested JSON shape.\n- Use flat strings and short arrays unless the user explicitly requested nested objects.\n- Keep the final output compact, syntactically valid JSON, and preserve the requested output contract exactly.\n- Preserve requested output format exactly.",
+      "qualityScore": 0.778,
+      "qualityChecks": "7/9",
+      "qualityPassed": false,
+      "ideaScore": 0.375,
+      "ideaChecks": "3/8",
+      "ideaPassed": false,
+      "correct": false,
+      "jsonValid": true,
+      "criticalMisses": [
+        "file:README.md",
+        "symbol:buildSuitePrompt"
+      ],
+      "expectedEvidence": {
+        "files": [
+          "README.md",
+          "src/suite-benchmark.ts"
+        ],
+        "symbols": [
+          "runSuiteBenchmarkCommand",
+          "buildSuitePrompt"
+        ],
+        "terms": [
+          "tokenopt",
+          "codegraph",
+          "quality",
+          "benchmark"
+        ]
+      },
+      "qualityRubric": [
+        "maps tradeoff between token cost and signal",
+        "covers benchmark and mcp selection",
+        "mentions output shape",
+        "contains valid compact JSON"
+      ]
+    }
+  ]
+}

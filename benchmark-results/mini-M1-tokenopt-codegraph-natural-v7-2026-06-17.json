@@ -1,0 +1,85 @@
+{
+  "generatedAt": "2026-06-16T22:51:03.957Z",
+  "runner": "codex exec --json",
+  "codexPackage": "@openai/codex@0.137.0",
+  "suite": {
+    "path": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\mini-tokenopt-comparison-suite.json",
+    "name": "mini-tokenopt-natural-comparison",
+    "version": "2026-06-16",
+    "purpose": "Controlled mini suite to compare baseline/mcp/codegraph/hybrid token economics on same prompts."
+  },
+  "codegraph": {
+    "prewarm": false,
+    "prewarmTimeoutMs": 1800000
+  },
+  "modes": [
+    "tokenopt-codegraph-natural"
+  ],
+  "skippedRepos": [],
+  "rows": [
+    {
+      "exitCode": 0,
+      "durationMs": 39139,
+      "finalAnswer": "{\"project_overview\":\"TokenOpt is a TypeScript CLI repository for managing repository-local AI-coding workflow tooling (Codex/Copilot), including hook setup, instruction packaging, benchmarking, MCP mode, command wrapping, health checks, and reporting. Its `src/cli.ts` dispatches top-level CLI commands into dedicated command modules.\",\"commands\":[\"help (\\\"--help\\\"/\\\"-h\\\")\",\"init\",\"install\",\"setup\",\"hook\",\"exec\",\"mcp\",\"benchmark\",\"instructions\",\"report\",\"doctor\"],\"files\":[\"src/cli.ts\",\"src/config.ts\",\"src/copilot-setup.ts\",\"src/install.ts\",\"src/codex-adapter.ts\",\"src/copilot-adapter.ts\",\"src/doctor.ts\",\"src/exec.ts\",\"src/mcp.ts\",\"src/benchmark.ts\",\"src/codex-benchmark.ts\",\"src/suite-benchmark.ts\",\"src/workflow-ab-benchmark.ts\",\"src/instruction-audit.ts\",\"src/observability.ts\",\"src/report.ts\",\"src/types.ts\"],\"risks\":[\"The `exec` subcommand delegates directly to wrapped command execution from user args, which can execute arbitrary commands if invoked incorrectly.\",\"`instructions install` and similar subcommands rely on strict positional parsing and exact string matches, so malformed CLI syntax quickly maps to usage/usage-like errors with no structured recovery.\",\"Config/install commands write to filesystem locations with limited conflict handling beyond simple existence checks, so interrupted runs can leave partial generated/instrumented state.\"]}",
+      "routeMetadataText": "",
+      "usage": {
+        "input_tokens": 64869,
+        "cached_input_tokens": 52096,
+        "output_tokens": 5284,
+        "reasoning_output_tokens": 4764
+      },
+      "usageStatus": "available",
+      "toolCalls": 1,
+      "shellCalls": 0,
+      "mcpCalls": 1,
+      "toolInputChars": 247,
+      "toolOutputChars": 12667,
+      "warnings": 85,
+      "rawLogPath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-M1-tokenopt-codegraph-natural-v7-2026-06-17\\tokenopt-M1-cli-commands-tokenopt-codegraph-natural.jsonl",
+      "lastMessagePath": "D:\\Personal\\Projects\\tokenopt\\benchmark-results\\raw\\mini-M1-tokenopt-codegraph-natural-v7-2026-06-17\\tokenopt-M1-cli-commands-tokenopt-codegraph-natural-last.txt",
+      "repo": "D:\\Personal\\Projects\\tokenopt",
+      "project": "tokenopt",
+      "taskId": "M1-cli-commands",
+      "taskClass": "build_handoff",
+      "acquisitionMode": "coding_coverage",
+      "evidenceContract": "coding_coverage",
+      "evidenceContractPass": false,
+      "fallbackReason": "",
+      "doubleSpend": false,
+      "mode": "tokenopt-codegraph-natural",
+      "prompt": "Return valid compact JSON only with keys project_overview, commands, files, risks. \"project_overview\": concise 1-2 line summary of this repository. \"commands\": top-level CLI commands from src/cli.ts. \"files\": files referenced by commands if inferable. \"risks\": implementation risks. Do not modify files.",
+      "codexPrompt": "Task (do not rephrase):\nReturn valid compact JSON only with keys project_overview, commands, files, risks. \"project_overview\": concise 1-2 line summary of this repository. \"commands\": top-level CLI commands from src/cli.ts. \"files\": files referenced by commands if inferable. \"risks\": implementation risks. Do not modify files.\n\nBenchmark constraints:\n- Preserve the requested output format exactly.\n- Cite repository-relative files when the task asks for citations.\n- Do not modify files.\n- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.\n- Repository root: D:\\Personal\\Projects\\tokenopt\n\n- Route policy: coding evidence. Require owner files, symbols, tests, validation, and business behavior coverage before treating the answer as complete.\n- Treat this as a normal developer request. The user's prompt, repository instructions, and any active agent instructions remain authoritative.\n- Evidence intent for context acquisition only: \"\\\"project_overview\\\": concise 1-2 line summary of this repository. \\\"commands\\\": top-level CLI commands from src/cli.ts. \\\" \\\": referenced by commands if inferable. \\\" \\\": implementation . Do not modify .\". Use this semantic code question for context lookup inputs; keep the original user prompt for the final output shape.\n- Do not pass output-schema boilerplate, JSON key names, benchmark harness text, or generic words like return/valid/compact as retrieval intent.\n- Required evidence slots before final answer: source_files, symbols, risks, backend_entrypoint_api, service_domain_logic, business_invariants_or_bug_symptom, validation_commands, frontend_state_or_caller_when_present.\n- Quality rubric to keep in mind: [\"includes project summary\",\"lists command families\",\"references evidence-bearing files\",\"mentions one key risk\",\"contains valid compact JSON\"].\n- For broad or unknown-owner tasks, a compact context packet around 1200 tokens is usually the cheapest first step when available.\n- Because the task already names concrete targets, prefer exact bounded source or graph lookups before broad context gathering.\n- Choose the next action by the missing evidence slot, not by a fixed tool script.\n- Hard budget: use at most 3 context/source tool calls total. For exact-target or small CLI/code-reading tasks, aim for 1-2 total calls.\n- Do not call a source-slice style tool with only a file path and no line range, symbol, or bounded slice hint; failed or unbounded calls still count against the budget.\n- If the first evidence pass covers the required slots well enough, answer from it and stop.\n- If one important slot is still weak, make one focused bounded followup for that named file, symbol, route, test, business rule, or attachment.\n- If quality still depends on graph/source structure, make at most one final structured source followup and then stop.\n- Avoid iterative low-level expansion; do not walk command surfaces, file trees, or symbol neighbors beyond the slots required by the prompt.\n- Do not spend a separate call only to find a project overview or README when source, package, or context evidence already supports a concise summary.\n- Do not duplicate evidence through another provider when the current slices already cover the same files or symbols.\n- Shell fallback is disabled in this benchmark mode; unresolved coverage must be stated in the requested JSON shape.\n- Use flat strings and short arrays unless the user explicitly requested nested objects.\n- Keep the final output compact, syntactically valid JSON, and preserve the requested output contract exactly.\n- Preserve requested output format exactly.",
+      "qualityScore": 0.833,
+      "qualityChecks": "5/6",
+      "qualityPassed": true,
+      "ideaScore": 0.375,
+      "ideaChecks": "3/8",
+      "ideaPassed": false,
+      "correct": true,
+      "jsonValid": true,
+      "criticalMisses": [
+        "symbol:helpText"
+      ],
+      "expectedEvidence": {
+        "files": [
+          "src/cli.ts"
+        ],
+        "symbols": [
+          "helpText"
+        ],
+        "terms": [
+          "benchmark",
+          "hook",
+          "mcp"
+        ]
+      },
+      "qualityRubric": [
+        "includes project summary",
+        "lists command families",
+        "references evidence-bearing files",
+        "mentions one key risk",
+        "contains valid compact JSON"
+      ]
+    }
+  ]
+}
