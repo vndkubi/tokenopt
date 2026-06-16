@@ -133,22 +133,44 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
 test("native prompt pack installs reusable Copilot prompt files", () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-native-prompts-"));
   const plan = buildNativePromptPack(repo);
-  assert.equal(plan.files.length, 21);
+  assert.equal(plan.files.length, 27);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "investigate-flow.prompt.md"))), true);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "e2e-trace-flow.prompt.md"))), true);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "investigate-pbi.prompt.md"))), true);
   assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "write-unittest.prompt.md"))), true);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "write-unittest-class.prompt.md"))), true);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "bug-trace.prompt.md"))), true);
+  assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "refactor-code.prompt.md"))), true);
   assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "trace-bug.prompt.md"))), true);
   assert.equal(plan.files.some((file) => file.path.endsWith(path.join(".github", "prompts", "spec-feature-plan.prompt.md"))), true);
 
   const files = installNativePromptPack(repo);
-  assert.equal(files.length, 21);
+  assert.equal(files.length, 27);
+  const investigateFlow = fs.readFileSync(path.join(repo, ".github", "prompts", "investigate-flow.prompt.md"), "utf8");
+  assert.match(investigateFlow, /name: investigate-flow/);
+  assert.match(investigateFlow, /TokenOpt\+CodeGraph mode/);
+
   const writeUnittest = fs.readFileSync(path.join(repo, ".github", "prompts", "write-unittest.prompt.md"), "utf8");
   assert.match(writeUnittest, /name: write-unittest/);
   assert.match(writeUnittest, /coding_coverage once/);
   assert.match(writeUnittest, /at most one additional allowed MCP followup/);
 
+  const writeUnittestClass = fs.readFileSync(path.join(repo, ".github", "prompts", "write-unittest-class.prompt.md"), "utf8");
+  assert.match(writeUnittestClass, /name: write-unittest-class/);
+  assert.match(writeUnittestClass, /changeType=test/);
+
   const traceBug = fs.readFileSync(path.join(repo, ".github", "prompts", "trace-bug.prompt.md"), "utf8");
   assert.match(traceBug, /name: trace-bug/);
   assert.match(traceBug, /native narrow search\/read directly/);
   assert.match(traceBug, /tokenopt_failure_packet/);
+
+  const bugTrace = fs.readFileSync(path.join(repo, ".github", "prompts", "bug-trace.prompt.md"), "utf8");
+  assert.match(bugTrace, /name: bug-trace/);
+  assert.match(bugTrace, /failure artifact/);
+
+  const refactorCode = fs.readFileSync(path.join(repo, ".github", "prompts", "refactor-code.prompt.md"), "utf8");
+  assert.match(refactorCode, /name: refactor-code/);
+  assert.match(refactorCode, /behavior invariants first/);
 
   const securityAudit = fs.readFileSync(path.join(repo, ".github", "prompts", "security-audit.prompt.md"), "utf8");
   assert.match(securityAudit, /name: security-audit/);
@@ -216,7 +238,7 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.match(copilotAgent, /tokenopt\/tokenopt_compile_evidence/);
   assert.match(writeUnittestPrompt, /name: write-unittest/);
   assert.match(traceBugPrompt, /name: trace-bug/);
-  assert.equal(result.promptFiles.length, 21);
+  assert.equal(result.promptFiles.length, 27);
   assert.equal((agentsInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
   assert.deepEqual(config.mcpServers.keep.tools, ["*"]);
   assert.equal(config.mcpServers.tokenopt.command, "node");

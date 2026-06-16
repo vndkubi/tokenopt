@@ -1,0 +1,599 @@
+{
+  "name": "Developer Daily Playbook Suite",
+  "version": "2026-06-14",
+  "purpose": "Compare baseline, TokenOpt-only, CodeGraph-only, and TokenOpt+CodeGraph hybrid on representative daily developer prompts: business deepdive, investigate-flow, pbi-plan, write-unittest-class, requirement-analysis, investigate-pbi, e2e-trace-flow, bug-trace, performance-analysis, security-audit, review-code, implement handoff, and refactor-code.",
+  "tasks": [
+    {
+      "id": "doughnut-recall-business-deepdive",
+      "project": "doughnut",
+      "class": "business_deepdive",
+      "winnerHypothesis": "A good business deepdive should connect recall loading, answering, scheduling, UI session state, and tests without turning into generic spaced-repetition prose.",
+      "prompt": "Daily task: business deepdive the learner recall experience. Explain how due recall loading, answering questions, spelling vs non-spelling paths, scheduling, current recall window metadata, and treadmill mode fit together. Return valid compact JSON only with keys: summary, business_flow, core_entities, files, symbols, existing_tests, risks, next_questions. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java",
+          "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+          "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java",
+          "backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java",
+          "frontend/src/pages/RecallPage.vue",
+          "frontend/src/composables/useRecallData.ts",
+          "frontend/tests/pages/RecallPage.spec.ts"
+        ],
+        "symbols": [
+          "recalling",
+          "answerQuiz",
+          "answerSpelling",
+          "getDueMemoryTrackers",
+          "markAsRecalled",
+          "recalledSuccessfully",
+          "recallFailed",
+          "treadmillMode"
+        ],
+        "terms": [
+          "toRepeat",
+          "currentRecallWindowEndAt",
+          "nextRecallAt",
+          "thinkingTimeMs",
+          "spelling"
+        ]
+      },
+      "qualityRubric": [
+        "Connects backend recall loading, answer submission, scheduling state, and frontend session behavior.",
+        "Separates spelling and non-spelling paths and names current-window metadata.",
+        "Names existing source and test surfaces."
+      ],
+      "gateAssertions": [
+        "deepdive is grounded in actual files and symbols",
+        "answer captures business invariants and risks"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "elasticsearch-search-investigate-flow",
+      "project": "elasticsearch",
+      "class": "investigate_flow",
+      "winnerHypothesis": "A good flow investigation should trace REST search params into SearchRequest and TransportSearchAction defaulting/pre-filter decisions.",
+      "prompt": "Daily task: investigate the Elasticsearch REST search flow for allow_partial_search_results and pre_filter_shard_size. Trace how the request params are parsed and how transport execution/defaulting uses them. Return valid compact JSON only with keys: summary, flow, invariants, files, symbols, tests_to_run, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "server/src/main/java/org/elasticsearch/rest/action/search/RestSearchAction.java",
+          "server/src/main/java/org/elasticsearch/action/search/TransportSearchAction.java",
+          "server/src/test/java/org/elasticsearch/rest/action/search/RestSearchActionTests.java",
+          "server/src/test/java/org/elasticsearch/action/search/TransportSearchActionTests.java"
+        ],
+        "symbols": [
+          "parseSearchRequest",
+          "allowPartialSearchResults",
+          "setPreFilterShardSize",
+          "shouldPreFilterSearchShards",
+          "shouldMinimizeRoundtrips"
+        ],
+        "terms": [
+          "allow_partial_search_results",
+          "pre_filter_shard_size",
+          "defaultAllowPartialSearchResults",
+          "nullable",
+          "can-match"
+        ]
+      },
+      "qualityRubric": [
+        "Traces REST parser fields to SearchRequest mutation.",
+        "Distinguishes omitted allow_partial_search_results from explicit true/false.",
+        "Connects pre_filter_shard_size to transport can-match/pre-filter behavior and tests."
+      ],
+      "gateAssertions": [
+        "answer cites parser and transport execution/defaulting",
+        "answer names focused tests"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "hadoop-yarn-app-filter-e2e-trace-flow",
+      "project": "hadoop",
+      "class": "e2e_trace_flow",
+      "winnerHypothesis": "A good E2E trace should order YARN RM app filtering from REST query params through request building, parsing/normalization, RM-side matching, and tests.",
+      "prompt": "Daily task: e2e trace flow for YARN RM /ws/v1/cluster/apps filtering by applicationTypes and applicationTags. Trace REST query params to RMWebServices, ApplicationsRequestBuilder, WebServices.parseQueries, GetApplicationsRequest, final RM-side filtering, and tests. Return valid compact JSON only with keys: entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/RMWebServices.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/ApplicationsRequestBuilder.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/src/main/java/org/apache/hadoop/yarn/server/webapp/WebServices.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/test/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/TestApplicationsRequestBuilder.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/test/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/TestRMWebServicesApps.java"
+        ],
+        "symbols": [
+          "RMWebServices",
+          "getApps",
+          "ApplicationsRequestBuilder",
+          "withApplicationTypes",
+          "withApplicationTags",
+          "parseQueries",
+          "GetApplicationsRequest"
+        ],
+        "terms": [
+          "applicationTypes",
+          "applicationTags",
+          "lowercase",
+          "comma",
+          "sequence"
+        ]
+      },
+      "qualityRubric": [
+        "Orders the full flow from REST query params to request object and RM-side matching.",
+        "Separates applicationTypes case normalization from applicationTags parsing behavior.",
+        "Names exact source/test surfaces and marks any inferred edge."
+      ],
+      "gateAssertions": [
+        "E2E trace cites entrypoint, parser, request builder, and tests",
+        "answer includes invariants and inferred-edge handling"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "hadoop-yarn-app-filter-requirement-analysis",
+      "project": "hadoop",
+      "class": "requirement_analysis",
+      "winnerHypothesis": "A good requirement analysis should map app filter hardening requirements to RMWebServices, ApplicationsRequestBuilder, parsing, and existing tests.",
+      "prompt": "Daily task: requirement analyst for YARN RM app filtering hardening. Requirement: applicationTypes and applicationTags query params should handle null, empty, comma-separated, whitespace-only, and mixed-case values consistently without breaking existing REST clients. Return valid compact JSON only with keys: requirement_summary, current_behavior, acceptance_criteria, impacted_files, symbols, test_strategy, risks, open_questions. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/RMWebServices.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/ApplicationsRequestBuilder.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/src/main/java/org/apache/hadoop/yarn/server/webapp/WebServices.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/test/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/TestApplicationsRequestBuilder.java",
+          "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/test/java/org/apache/hadoop/yarn/server/resourcemanager/webapp/TestRMWebServicesApps.java"
+        ],
+        "symbols": [
+          "RMWebServices",
+          "ApplicationsRequestBuilder",
+          "withApplicationTypes",
+          "withApplicationTags",
+          "parseQueries"
+        ],
+        "terms": [
+          "applicationTypes",
+          "applicationTags",
+          "comma",
+          "whitespace",
+          "lowercase"
+        ]
+      },
+      "qualityRubric": [
+        "Maps requirement cases to current parser/builder behavior.",
+        "Separates appTypes and appTags compatibility risks.",
+        "Names targeted unit and web-service test surfaces."
+      ],
+      "gateAssertions": [
+        "requirement analysis is code-grounded",
+        "answer produces acceptance criteria and tests"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "doughnut-recall-forecast-pbi-investigate",
+      "project": "doughnut",
+      "class": "pbi_investigate",
+      "winnerHypothesis": "A good PBI investigation should translate forecast-count requirements into backend DTO/service/controller and frontend recall-page impacts without unrelated recall rewrites.",
+      "prompt": "Daily task: investigate this PBI before planning edits. PBI: As a learner, I want the Recall page to show how many recall items are due now and how many more would be loaded from the next 3, 7, and 14 days, so that I can decide whether to continue recalling without blindly clicking each load-more button. Acceptance criteria: the recall API exposes forecast counts for due windows 0, 3, 7, and 14 days using the same timezone and half-day alignment rules as current recall loading; counts are monotonic by window and exclude deleted/removed trackers; existing Load more from next 3/7/14 days behavior remains compatible; Recall page done state/buttons display forecast counts without breaking treadmill mode or current-session progress. Return valid compact JSON only with keys: pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+          "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+          "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+          "frontend/src/pages/RecallPage.vue",
+          "frontend/src/composables/useRecallData.ts",
+          "frontend/tests/pages/RecallPage.spec.ts"
+        ],
+        "symbols": [
+          "recalling",
+          "getDueMemoryTrackers",
+          "DueMemoryTrackers",
+          "loadMore",
+          "loadCurrentDueRecalls",
+          "setCurrentRecallWindowEndAt"
+        ],
+        "terms": [
+          "dueindays",
+          "currentRecallWindowEndAt",
+          "treadmillMode",
+          "Load more from next 3 days",
+          "monotonic"
+        ]
+      },
+      "qualityRubric": [
+        "Translates the PBI into backend API/DTO/service and frontend recall-page impacts.",
+        "Preserves Load more and treadmill/current-session behavior as compatibility constraints.",
+        "Identifies monotonicity and timezone/half-day risks."
+      ],
+      "gateAssertions": [
+        "PBI investigation grounds business behavior in current API/UI code",
+        "answer separates known impacts from unknowns"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "doughnut-recall-wrong-answer-bug-trace",
+      "project": "doughnut",
+      "class": "bug_trace",
+      "winnerHypothesis": "A good bug trace should localize wrong-answer retry scheduling to MemoryTracker.recallFailed and related service/controller tests.",
+      "prompt": "Daily task: bug trace. A regression report says that after a learner answers a recall prompt incorrectly, the next retry is no longer scheduled about 12 hours later. Trace the likely code path and produce a fix handoff. Return valid compact JSON only with keys: summary, reproduction_path, root_cause_hypotheses, files, symbols, tests_to_run, fix_plan, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java",
+          "backend/src/main/java/com/odde/doughnut/services/MemoryTrackerService.java",
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java",
+          "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java",
+          "backend/src/test/java/com/odde/doughnut/services/MemoryTrackerServiceTest.java"
+        ],
+        "symbols": [
+          "recallFailed",
+          "markAsRecalled",
+          "answerQuiz",
+          "answerSpelling",
+          "TimestampOperations.addHoursToTimestamp"
+        ],
+        "terms": [
+          "12",
+          "nextRecallAt",
+          "incorrect",
+          "thinkingTimeMs",
+          "spelling"
+        ]
+      },
+      "qualityRubric": [
+        "Starts from the bug symptom and traces controller/service/entity paths.",
+        "Identifies wrong-answer retry scheduling as distinct from success scheduling.",
+        "Names focused regression tests and risks."
+      ],
+      "gateAssertions": [
+        "bug trace is not generic debugging advice",
+        "answer provides fix handoff and validation"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "doughnut-recall-forecast-pbi-plan",
+      "project": "doughnut",
+      "class": "pbi_plan",
+      "winnerHypothesis": "A good implementation plan should produce scoped backend/frontend/test steps for forecast counts while preserving current recall loading semantics.",
+      "prompt": "Daily task: plan implementation for the Recall forecast-count PBI. Need API forecast counts for due windows 0, 3, 7, and 14 days, same timezone/half-day rules as current recall loading, monotonic counts excluding deleted/removed trackers, compatible Load more buttons, and UI counts that do not break treadmill mode or current-session progress. Return valid compact JSON only with keys: scope, out_of_scope, impacted_files, symbols, implementation_steps, tests, validation_commands, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+          "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+          "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+          "backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java",
+          "frontend/src/pages/RecallPage.vue",
+          "frontend/tests/pages/RecallPage.spec.ts"
+        ],
+        "symbols": [
+          "recalling",
+          "getDueMemoryTrackers",
+          "getMemoryTrackersNeedToRepeat",
+          "DueMemoryTrackers",
+          "loadMore",
+          "loadCurrentDueRecalls"
+        ],
+        "terms": [
+          "dueindays",
+          "currentRecallWindowEndAt",
+          "forecast counts",
+          "monotonic",
+          "treadmillMode"
+        ]
+      },
+      "qualityRubric": [
+        "Scopes backend DTO/service/controller edits and frontend recall-page/composable/test edits.",
+        "Maps each acceptance criterion to code/test surfaces.",
+        "Keeps existing Load more and treadmill/current-session behavior compatible."
+      ],
+      "gateAssertions": [
+        "plan is implementation-ready",
+        "answer includes validation commands or narrow test classes"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "doughnut-recall-forecast-implement-code-unittest",
+      "project": "doughnut",
+      "class": "implement_code_unittest",
+      "winnerHypothesis": "A good no-edit implementation handoff should be close enough for a developer to implement code and unit tests without another repo-wide investigation.",
+      "prompt": "Daily task: implement code + unit tests handoff for Recall forecast counts. Do not edit files in this benchmark; instead return an implementation-ready patch plan with exact files, symbols, DTO shape, backend tests, frontend tests, validation commands, and compatibility risks. Forecast windows are 0, 3, 7, and 14 days; counts use existing due logic/timezone/half-day alignment; deleted/removed trackers excluded; Load more/treadmill/current-session behavior must remain compatible. Return valid compact JSON only with keys: patch_summary, files_to_change, symbols, code_steps, unit_tests, validation_commands, compatibility_risks, open_questions.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+          "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+          "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+          "backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java",
+          "frontend/src/pages/RecallPage.vue",
+          "frontend/src/composables/useRecallData.ts",
+          "frontend/tests/pages/RecallPage.spec.ts"
+        ],
+        "symbols": [
+          "recalling",
+          "getDueMemoryTrackers",
+          "getToRecallCount",
+          "DueMemoryTrackers",
+          "loadMore",
+          "setCurrentRecallWindowEndAt"
+        ],
+        "terms": [
+          "forecast counts",
+          "dueindays",
+          "monotonic",
+          "deleted",
+          "removed"
+        ]
+      },
+      "qualityRubric": [
+        "Provides edit-ready backend and frontend steps with exact files and symbols.",
+        "Includes targeted unit/frontend tests and validation commands.",
+        "Preserves compatibility with existing due loading and session state."
+      ],
+      "gateAssertions": [
+        "handoff is concrete enough for implementation",
+        "answer does not invent code without evidence"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 2000
+      }
+    },
+    {
+      "id": "doughnut-recall-scheduling-write-unittest-class",
+      "project": "doughnut",
+      "class": "write_unittest_class",
+      "winnerHypothesis": "A good class-level unit-test plan should map recall answer scheduling to MemoryTracker and existing controller/entity tests without generic test advice.",
+      "prompt": "Daily task: write-unittest-class plan for MemoryTracker recall-answer scheduling. Cover correct vs wrong answers, thinkingTimeMs adjustment, early reward/late penalty, nextRecallAt recomputation, and spelling vs non-spelling paths. Return valid compact JSON only with keys: target_class, behavior, existing_coverage, missing_coverage, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java",
+          "backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java",
+          "backend/src/main/java/com/odde/doughnut/services/MemoryTrackerService.java",
+          "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java",
+          "backend/src/test/java/com/odde/doughnut/entities/ForgettingCurveThinkingTimeTest.java",
+          "backend/src/test/java/com/odde/doughnut/algorithms/SpacedRepetitionEarlyRewardsAndLatePenaltyTest.java"
+        ],
+        "symbols": [
+          "MemoryTracker",
+          "markAsRecalled",
+          "recalledSuccessfully",
+          "recallFailed",
+          "calculateNextRecallAt",
+          "thinkingTimeMs"
+        ],
+        "terms": [
+          "forgettingCurveIndex",
+          "nextRecallAt",
+          "early reward",
+          "late penalty",
+          "spelling"
+        ]
+      },
+      "qualityRubric": [
+        "Maps the target class and answer paths to existing tests and missing coverage.",
+        "Includes exact assertions for wrong-answer retry, success scheduling, thinking time, and spelling/non-spelling behavior.",
+        "Names a targeted backend test command or test class."
+      ],
+      "gateAssertions": [
+        "test plan cites both target class and existing tests",
+        "answer includes concrete assertions and validation"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "elasticsearch-search-prefilter-performance-analysis",
+      "project": "elasticsearch",
+      "class": "performance_analysis",
+      "winnerHypothesis": "A good performance analysis should explain can-match/pre-filter cost tradeoffs and propose measurements before refactoring TransportSearchAction.",
+      "prompt": "Daily task: performance-analysis for Elasticsearch search pre-filtering/can-match behavior. Analyze pre_filter_shard_size, primary-field sort, match-none rewrite, remote/CCS minimize-roundtrips, and how to measure whether a refactor changes latency or shard fanout. Return valid compact JSON only with keys: target, suspected_hotspots, cost_model, measurements, optimization_options, validation_commands, risks, evidence_used. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "server/src/main/java/org/elasticsearch/rest/action/search/RestSearchAction.java",
+          "server/src/main/java/org/elasticsearch/action/search/TransportSearchAction.java",
+          "server/src/test/java/org/elasticsearch/action/search/TransportSearchActionTests.java",
+          "server/src/test/java/org/elasticsearch/rest/action/search/RestSearchActionTests.java"
+        ],
+        "symbols": [
+          "shouldPreFilterSearchShards",
+          "setPreFilterShardSize",
+          "getPreFilterShardSize",
+          "shouldMinimizeRoundtrips",
+          "hasPrimaryFieldSort"
+        ],
+        "terms": [
+          "pre_filter_shard_size",
+          "can-match",
+          "latency",
+          "measurement",
+          "ccs_minimize_roundtrips"
+        ]
+      },
+      "qualityRubric": [
+        "Separates observed code path from hypotheses and names measurement points.",
+        "Explains shard fanout/can-match/pre-filter tradeoffs without proposing unmeasured fixes.",
+        "Names targeted tests or benchmarks for threshold, sort, rewrite, and CCS behavior."
+      ],
+      "gateAssertions": [
+        "performance analysis includes cost model and validation plan",
+        "answer is measurement-first"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    },
+    {
+      "id": "doughnut-recall-scheduling-security-audit",
+      "project": "doughnut",
+      "class": "security_audit",
+      "winnerHypothesis": "A good security audit should stay diff/scope-first, flag missing authorization/user-boundary evidence only when relevant, and avoid inventing vulnerabilities from generic recall code.",
+      "prompt": "Daily task: security-audit this proposed recall API patch. Focus on user boundary, authorization, input validation for dueindays, data exposure, and test guardrails. Return valid compact JSON only with keys: status, findings, evidence_used, missing_coverage, non_findings, next_steps.\n\n```diff\ndiff --git a/backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java b/backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java\n@@ -39,7 +39,7 @@ class RecallsController {\n   @GetMapping(value = {\"/recalling\"})\n   public DueMemoryTrackers recalling(\n       @AuthenticationPrincipal UserModel currentUser,\n-      @RequestParam(name = \"dueindays\", required = false, defaultValue = \"0\") Integer dueInDays) {\n+      @RequestParam(name = \"dueindays\", required = false, defaultValue = \"14\") Integer dueInDays) {\n     return recallService.getDueMemoryTrackers(currentUser.getEntity(), currentUTCTimestamp(), currentUser.getTimeZone(), dueInDays);\n   }\n```\nDo not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+          "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+          "backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java"
+        ],
+        "symbols": [
+          "recalling",
+          "UserModel",
+          "getDueMemoryTrackers",
+          "dueindays"
+        ],
+        "terms": [
+          "authorization",
+          "input validation",
+          "data exposure",
+          "defaultValue",
+          "non_findings"
+        ]
+      },
+      "qualityRubric": [
+        "Audits concrete security boundaries without turning every business change into a vulnerability.",
+        "Checks user scoping, authorization/authentication, dueindays validation, data exposure, and tests.",
+        "Separates actual findings from non-findings and missing coverage."
+      ],
+      "gateAssertions": [
+        "security audit is scope-first and evidence-backed",
+        "answer avoids generic vulnerability claims"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 3,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 2000
+      }
+    },
+    {
+      "id": "doughnut-recall-scheduling-code-review",
+      "project": "doughnut",
+      "class": "code_review",
+      "winnerHypothesis": "A good review should catch that replacing wrong-answer 12-hour retry with calculateNextRecallAt changes business behavior and needs tests, then separate technical findings from business/test coverage.",
+      "prompt": "Daily task: review-code this proposed patch for recall-answer scheduling. Run technical review first, then business review/test coverage. Focus on correctness regressions, business behavior, missing tests, syntax/runtime bugs, and similar logic impact. Return valid compact JSON only with keys: technical_review, business_review, findings, business_coverage, similar_logic, missing_tests, files, symbols, risks, review_status.\n\n```diff\ndiff --git a/backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java b/backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java\n@@ -98,8 +98,8 @@ public class MemoryTracker {\n   public void recallFailed(Timestamp currentUTCTimestamp) {\n     setForgettingCurveIndex(forgettingCurve().failed());\n-    setNextRecallAt(TimestampOperations.addHoursToTimestamp(currentUTCTimestamp, 12));\n+    setNextRecallAt(calculateNextRecallAt());\n   }\n```\nDo not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java"
+        ],
+        "symbols": [
+          "recallFailed",
+          "calculateNextRecallAt",
+          "currentUTCTimestamp"
+        ],
+        "terms": [
+          "P1",
+          "12",
+          "failed",
+          "regression",
+          "missing tests",
+          "changes_requested"
+        ]
+      },
+      "qualityRubric": [
+        "Identifies the behavioral regression in wrong-answer retry scheduling.",
+        "Explains why calculateNextRecallAt is not equivalent to a 12-hour retry after failure.",
+        "Separates technical findings from business/test coverage.",
+        "Checks similar success-path scheduling logic and asks for targeted tests."
+      ],
+      "gateAssertions": [
+        "review reports findings first",
+        "answer requests changes and names missing test coverage"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 3,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 2000
+      }
+    },
+    {
+      "id": "elasticsearch-search-prefilter-refactor-plan",
+      "project": "elasticsearch",
+      "class": "refactor_code",
+      "winnerHypothesis": "A good refactor plan should preserve TransportSearchAction pre-filter semantics and tests while narrowing edit scope.",
+      "prompt": "Daily task: refactor planning. We want to make the search pre-filter/can-match decision easier to maintain without changing behavior. Analyze the current pre_filter_shard_size, primary-field sort, match-none rewrite, and CCS minimize-roundtrips logic, then propose a safe refactor plan. Return valid compact JSON only with keys: refactor_goal, current_flow, files, symbols, safe_steps, tests, validation_commands, risks. Do not modify files.",
+      "expectedEvidence": {
+        "files": [
+          "server/src/main/java/org/elasticsearch/rest/action/search/RestSearchAction.java",
+          "server/src/main/java/org/elasticsearch/action/search/TransportSearchAction.java",
+          "server/src/test/java/org/elasticsearch/action/search/TransportSearchActionTests.java",
+          "server/src/test/java/org/elasticsearch/rest/action/search/RestSearchActionTests.java"
+        ],
+        "symbols": [
+          "shouldPreFilterSearchShards",
+          "setPreFilterShardSize",
+          "getPreFilterShardSize",
+          "shouldMinimizeRoundtrips",
+          "hasPrimaryFieldSort"
+        ],
+        "terms": [
+          "pre_filter_shard_size",
+          "canRewriteToMatchNone",
+          "primary field sort",
+          "ccs_minimize_roundtrips",
+          "can-match"
+        ]
+      },
+      "qualityRubric": [
+        "Preserves current behavior and names invariants before refactor steps.",
+        "Scopes refactor around exact source and tests.",
+        "Includes validation for threshold, sort, rewrite, and CCS behavior."
+      ],
+      "gateAssertions": [
+        "refactor plan is behavior-preserving",
+        "answer names tests and risks"
+      ],
+      "maxBudget": {
+        "mcpCallsCompiled": 1,
+        "targetedShellCalls": 4,
+        "shellCallsAfterAnswerable": 0,
+        "packetTokens": 1800
+      }
+    }
+  ]
+}

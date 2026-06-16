@@ -2564,9 +2564,18 @@ interface TargetSpecificityCheck {
   missing: string[];
 }
 
+interface FlowSearchHit {
+  term: string;
+  file: string;
+  line: number;
+  preview: string;
+}
+
 interface FlowProfile {
   target: string;
   searchTerms: string[];
+  exactSearchTerms: string[];
+  exactSearchHits: FlowSearchHit[];
   candidateEntrypoints: string[];
   candidateServices: string[];
   candidateDataFiles: string[];
@@ -2591,7 +2600,7 @@ function compileTaskSpecificEvidence(
     return compileBusinessResearchEvidence(task, repoRoot, firstEvidenceIndex, context);
   }
   if (taskType === "api_flow") {
-    return compileFlowEvidence(task, firstEvidenceIndex, context);
+    return compileFlowEvidence(task, repoRoot, firstEvidenceIndex, context);
   }
   const coding = compileCodingCoverageEvidence({
     repoRoot,
@@ -2637,6 +2646,7 @@ function checkTargetSpecificity(task: string, taskType: EvidenceTaskType, eviden
 }
 
 function extractSpecificTaskTerms(task: string, taskType: EvidenceTaskType): string[] {
+  const taskText = stripOutputContractText(task);
   const stopWords = new Set([
     "about",
     "after",
@@ -2711,10 +2721,24 @@ function extractSpecificTaskTerms(task: string, taskType: EvidenceTaskType): str
     "write"
   ]);
   const terms = new Set<string>();
-  for (const term of [...extractQuotedTerms(task), ...extractRouteTerms(task)]) {
+  const anchoredTerms = [
+    ...extractQuotedTerms(taskText),
+    ...extractRouteTerms(taskText),
+    ...extractStrongCodeLikeTaskTerms(taskText),
+    ...extractHyphenatedIdentifierVariants(taskText)
+  ];
+  if (taskType === "api_flow") {
+    anchoredTerms.push(...splitFlowTerms(extractFlowTarget(taskText)).filter((term) => !/^flow_target_not_explicit$/i.test(term)).slice(0, 4));
+  }
+  for (const term of anchoredTerms) {
     addSpecificTerm(terms, term, stopWords);
   }
-  for (const match of task.matchAll(/\b[A-Za-z][A-Za-z0-9_./:-]{2,}\b/g)) {
+  if (terms.size > 0) {
+    const ordered = [...terms];
+    return ordered.slice(0, taskType === "api_flow" ? 8 : 5);
+  }
+
+  for (const match of taskText.matchAll(/\b[A-Za-z][A-Za-z0-9_./:-]{2,}\b/g)) {
     addSpecificTerm(terms, match[0], stopWords);
   }
 
@@ -2759,25 +2783,45 @@ function buildTargetSpecificFollowups(missingTerms: string[]): EvidenceFollowup[
   ];
 }
 
-function compileFlowEvidence(task: string, firstEvidenceIndex: number, context: EvidenceContext): TaskSpecificEvidence {
-  const profile = extractFlowProfile(task, context);
+function compileFlowEvidence(task: string, repoRoot: string, firstEvidenceIndex: number, context: EvidenceContext): TaskSpecificEvidence {
+  const profile = extractFlowProfile(task, context, repoRoot);
   const hasCandidateCode = profile.candidateEntrypoints.length > 0 || profile.candidateServices.length > 0;
+  const hasExactSourceEvidence = hasPrimarySourceEvidence(profile);
+  const wantsTestPlan = isDailyTestPlanTask(task);
+  const hasTestEvidence = profile.candidateTests.length > 0;
+  const largeRepoNeedsProofFollowup = context.inventory.totalFiles > 1000;
+  const answerable = !largeRepoNeedsProofFollowup && profile.hasNamedTarget && hasExactSourceEvidence && (!wantsTestPlan || hasTestEvidence);
+  const confidence = answerable
+    ? hasTestEvidence ? 0.86 : 0.8
+    : hasCandidateCode || hasExactSourceEvidence ? 0.68 : 0.52;
+  const sourceFiles = uniqueStrings([
+    ...profile.candidateEntrypoints,
+    ...profile.candidateServices,
+    ...profile.candidateDataFiles
+  ]);
 
   return {
-    answerable: false,
-    confidence: hasCandidateCode ? 0.66 : 0.52,
+    answerable,
+    confidence,
     coverage: {
       flow_target: profile.hasNamedTarget ? "covered" : "partial",
-      candidate_entrypoints: profile.candidateEntrypoints.length > 0 ? "partial" : "missing",
-      candidate_services: profile.candidateServices.length > 0 ? "partial" : "missing",
-      candidate_tests: profile.candidateTests.length > 0 ? "partial" : "missing",
+      exact_source_evidence: hasExactSourceEvidence ? "covered" : "missing",
+      entrypoint: profile.candidateEntrypoints.length > 0 ? hasExactSourceEvidence ? "covered" : "partial" : "missing",
+      call_chain: sourceFiles.length >= 2 ? "partial" : hasExactSourceEvidence ? "partial" : "missing",
+      business_state_changes: profile.candidateDataFiles.length > 0 || profile.candidateServices.length > 0 ? "partial" : "missing",
+      tests_or_examples: profile.candidateTests.length > 0 ? "covered" : wantsTestPlan ? "missing" : "partial",
+      candidate_entrypoints: profile.candidateEntrypoints.length > 0 ? hasExactSourceEvidence ? "covered" : "partial" : "missing",
+      candidate_services: profile.candidateServices.length > 0 ? hasExactSourceEvidence ? "covered" : "partial" : "missing",
+      candidate_tests: profile.candidateTests.length > 0 ? "covered" : wantsTestPlan ? "missing" : "partial",
       diagram_contract: "covered",
       business_context: profile.businessContext.length > 0 ? "partial" : "missing"
     },
     evidence: [
       {
         id: `E${firstEvidenceIndex}`,
-        claim: "Flow deep-dive packet identified the target flow and bounded candidate evidence, but exact code-path proof still requires targeted followups.",
+        claim: answerable
+          ? "Daily flow packet found exact target matches plus bounded source/test candidates for an implementation handoff."
+          : "Flow deep-dive packet identified the target flow and bounded candidate evidence; exact code-path proof still requires targeted followups.",
         files: [
           ...profile.candidateDocs,
           ...profile.candidateEntrypoints,
@@ -2787,6 +2831,10 @@ function compileFlowEvidence(task: string, firstEvidenceIndex: number, context: 
         ].slice(0, 28),
         facts: [
           `flow_target=${profile.target}`,
+          `exact_matches=${formatFlowSearchHits(profile.exactSearchHits, 10) || "none_detected"}`,
+          `implementation_files=${sourceFiles.join(",") || "none_detected"}`,
+          `test_files=${profile.candidateTests.join(",") || "none_detected"}`,
+          `exact_search_terms=${profile.exactSearchTerms.join(",") || "none_detected"}`,
           `search_terms=${profile.searchTerms.join(",") || "none_detected"}`,
           `candidate_entrypoints=${profile.candidateEntrypoints.join(",") || "none_detected"}`,
           `candidate_services=${profile.candidateServices.join(",") || "none_detected"}`,
@@ -2809,56 +2857,124 @@ function compileFlowEvidence(task: string, firstEvidenceIndex: number, context: 
         tokens_est: 150
       }
     ],
-    missing: [
-      "Exact entrypoint, call chain, state transitions, and failure paths are not proven from inventory alone.",
-      "Use the allowed TokenOpt followups to read bounded slices around matched entrypoints/services/tests before drawing the final flow."
-    ],
-    allowedFollowups: [
-      {
-        tool: "tokenopt_search",
-        reason: "Find exact references to the requested flow name, route, command, service, or domain term.",
-        args: { pattern: profile.searchTerms[0] ?? "<flow-name-or-route>", path: "." },
-        max_output_tokens: 700
-      },
-      {
-        tool: "tokenopt_read_file",
-        reason: "Read a bounded slice around the most likely entrypoint or service match.",
-        args: { path: profile.candidateEntrypoints[0] ?? profile.candidateServices[0] ?? "<matched-file>", startLine: 1, maxLines: 180 },
-        max_output_tokens: 1100
-      },
-      {
-        tool: "tokenopt_search",
-        reason: "Find tests or examples that encode expected business behavior for the flow.",
-        args: { pattern: profile.searchTerms[0] ?? "<flow-name-or-domain-term>", path: profile.candidateTests.length > 0 ? path.dirname(profile.candidateTests[0]!) : "." },
-        max_output_tokens: 700
-      }
-    ]
+    missing: answerable
+      ? []
+      : buildFlowMissing(profile, wantsTestPlan, hasExactSourceEvidence, hasTestEvidence),
+    allowedFollowups: answerable ? [] : buildFlowFollowups(profile, wantsTestPlan)
   };
 }
 
-function extractFlowProfile(task: string, context: EvidenceContext): FlowProfile {
-  const target = extractFlowTarget(task);
+function hasPrimarySourceEvidence(profile: FlowProfile): boolean {
+  const strongPrimaryTerms = profile.exactSearchTerms.filter((term) => isStrongFlowAnchorTerm(term) && isPrimaryFlowAnchorTerm(term));
+  const primaryTerms = (strongPrimaryTerms.length > 0 ? strongPrimaryTerms : profile.exactSearchTerms).filter(isPrimaryFlowAnchorTerm);
+  const acceptedTerms = primaryTerms.length > 0 ? new Set(primaryTerms.slice(0, 3)) : undefined;
+  return profile.exactSearchHits.some((hit) =>
+    isSourceFlowFile(hit.file) && (!acceptedTerms || acceptedTerms.has(hit.term))
+  );
+}
+
+function isPrimaryFlowAnchorTerm(term: string): boolean {
+  const cleaned = term.trim();
+  if (!cleaned || /^(?:can|has|should|is)[A-Z]/.test(cleaned)) {
+    return false;
+  }
+  return cleaned.includes("/") ||
+    cleaned.includes("_") ||
+    /[a-z][A-Za-z0-9]*[A-Z]/.test(cleaned) ||
+    /^[a-z][a-z0-9]{6,}$/.test(cleaned);
+}
+
+function isStrongFlowAnchorTerm(term: string): boolean {
+  return term.includes("/") ||
+    term.includes("_") ||
+    /[a-z][A-Za-z0-9]*[A-Z]/.test(term);
+}
+
+function buildFlowMissing(
+  profile: FlowProfile,
+  wantsTestPlan: boolean,
+  hasExactSourceEvidence: boolean,
+  hasTestEvidence: boolean
+): string[] {
+  const missing: string[] = [];
+  if (!profile.hasNamedTarget) {
+    missing.push("The requested flow target is not explicit enough to compile a grounded daily-work passport.");
+  }
+  if (!hasExactSourceEvidence) {
+    missing.push("No exact source match was found for the requested route, API parameter, symbol, or behavior anchor.");
+  }
+  if (wantsTestPlan && !hasTestEvidence) {
+    missing.push("The task asks for a test plan, but no existing test/example file was found for the target behavior.");
+  }
+  if (missing.length === 0) {
+    missing.push("Exact entrypoint, call chain, state transitions, and failure paths need one bounded followup before final answer.");
+  }
+  return [
+    ...missing,
+    "Use the allowed TokenOpt followups only for the missing exact source/test evidence; avoid broad shell exploration."
+  ];
+}
+
+function buildFlowFollowups(profile: FlowProfile, wantsTestPlan: boolean): EvidenceFollowup[] {
+  const sourceFile = profile.candidateEntrypoints[0] ?? profile.candidateServices[0] ?? profile.candidateDataFiles[0];
+  const primaryPattern = profile.exactSearchTerms[0] ?? profile.searchTerms[0] ?? "<flow-name-or-route>";
+  const followups: EvidenceFollowup[] = [
+    {
+      tool: "tokenopt_search",
+      reason: "Find exact references to the requested route, API parameter, symbol, or behavior anchor.",
+      args: { pattern: primaryPattern, path: "." },
+      max_output_tokens: 700
+    }
+  ];
+  if (sourceFile) {
+    followups.push({
+      tool: "tokenopt_read_file",
+      reason: "Read a bounded slice around the most likely source entrypoint or service match.",
+      args: { path: sourceFile, startLine: 1, maxLines: 180 },
+      max_output_tokens: 1100
+    });
+  }
+  followups.push({
+    tool: "tokenopt_search",
+    reason: wantsTestPlan
+      ? "Find existing tests/examples that encode expected behavior before proposing missing coverage."
+      : "Find tests or examples that encode expected business behavior for the flow.",
+    args: { pattern: primaryPattern, path: profile.candidateTests.length > 0 ? path.dirname(profile.candidateTests[0]!) : "." },
+    max_output_tokens: 700
+  });
+  return followups;
+}
+
+function extractFlowProfile(task: string, context: EvidenceContext, repoRoot: string): FlowProfile {
+  const taskText = stripOutputContractText(task);
+  const target = extractFlowTarget(taskText);
   const searchTerms = uniqueStrings([
-    ...splitFlowTerms(target),
-    ...extractQuotedTerms(task),
-    ...extractRouteTerms(task)
-  ]).slice(0, 10);
+    ...extractQuotedTerms(taskText),
+    ...extractCodeLikeTaskTerms(taskText),
+    ...extractHyphenatedIdentifierVariants(taskText),
+    ...extractRouteTerms(taskText),
+    ...splitFlowTerms(target)
+  ]).filter(isUsefulFlowSearchTerm).slice(0, 16);
+  const exactSearchTerms = selectExactFlowSearchTerms(searchTerms).slice(0, 5);
+  const exactSearchHits = collectFlowSearchHits(repoRoot, exactSearchTerms);
   const importantFiles = context.inventory.importantFiles.map((file) => file.replace(/\\/g, "/"));
+  const hitFiles = uniqueStrings(exactSearchHits.map((hit) => hit.file));
+  const allCandidateFiles = prioritizeFlowFiles(uniqueStrings([...importantFiles, ...hitFiles]));
   const candidateDocs = importantFiles
     .filter((file) => /(^|\/)(docs|doc|README|readme)/i.test(file) && pathMatchesTerms(file, searchTerms))
     .slice(0, 8);
-  const sourceFiles = importantFiles.filter((file) => /\.(ts|tsx|js|jsx|java|py|go|rs|kt|scala|cs)$/i.test(file));
+  const sourceFiles = allCandidateFiles.filter((file) => isSourceFlowFile(file));
   const candidateEntrypoints = sourceFiles
-    .filter((file) => pathMatchesTerms(file, searchTerms) && /(?:controller|resource|route|routes|handler|endpoint|web|api|command|resolver|page|view)/i.test(file))
+    .filter((file) => (pathMatchesTerms(file, searchTerms) || hitFiles.includes(file)) && isEntrypointFlowFile(file))
     .slice(0, 10);
   const candidateServices = sourceFiles
-    .filter((file) => pathMatchesTerms(file, searchTerms) && /(?:service|manager|processor|workflow|flow|usecase|facade|application|domain)/i.test(file))
+    .filter((file) => (pathMatchesTerms(file, searchTerms) || hitFiles.includes(file)) && isServiceFlowFile(file))
     .slice(0, 10);
   const candidateDataFiles = sourceFiles
-    .filter((file) => pathMatchesTerms(file, searchTerms) && /(?:model|entity|schema|repository|dao|store|state|event|message)/i.test(file))
+    .filter((file) => (pathMatchesTerms(file, searchTerms) || hitFiles.includes(file)) && isDataFlowFile(file))
     .slice(0, 8);
-  const candidateTests = importantFiles
-    .filter((file) => pathMatchesTerms(file, searchTerms) && /(^|\/)(test|tests|src\/test|qa|__tests__)(\/|$)|\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(file))
+  const candidateTests = allCandidateFiles
+    .filter((file) => (pathMatchesTerms(file, searchTerms) || hitFiles.includes(file)) && isTestFlowFile(file))
     .slice(0, 10);
   const businessContext = uniqueStrings([
     context.overview ? `${context.overview.file}: ${context.overview.summary}` : "",
@@ -2869,6 +2985,8 @@ function extractFlowProfile(task: string, context: EvidenceContext): FlowProfile
   return {
     target,
     searchTerms,
+    exactSearchTerms,
+    exactSearchHits,
     candidateEntrypoints,
     candidateServices,
     candidateDataFiles,
@@ -2880,7 +2998,8 @@ function extractFlowProfile(task: string, context: EvidenceContext): FlowProfile
 }
 
 function extractFlowTarget(task: string): string {
-  const quoted = extractQuotedTerms(task)[0];
+  const taskText = stripOutputContractText(task);
+  const quoted = extractQuotedTerms(taskText)[0];
   if (quoted) {
     return cleanFactValue(quoted);
   }
@@ -2890,16 +3009,28 @@ function extractFlowTarget(task: string): string {
     /\b([A-Za-z0-9_./:-][A-Za-z0-9_ ./:-]{2,80})\s+flow\b/i
   ];
   for (const pattern of patterns) {
-    const match = task.match(pattern)?.[1];
+    const match = taskText.match(pattern)?.[1];
     if (match) {
       return cleanFactValue(match.replace(/\b(?:so|to|and|for me|please|giúp|ve|vẽ|diagram|mermaid)\b.*$/i, ""));
     }
   }
-  const route = extractRouteTerms(task)[0];
+  const route = extractRouteTerms(taskText)[0];
   if (route) {
     return route;
   }
+  const codeAnchor = [...extractCodeLikeTaskTerms(taskText), ...extractHyphenatedIdentifierVariants(taskText)]
+    .find((term) => isUsefulFlowSearchTerm(term));
+  if (codeAnchor) {
+    return codeAnchor;
+  }
   return "flow_target_not_explicit";
+}
+
+function stripOutputContractText(text: string): string {
+  return text
+    .replace(/\bReturn\s+(?:valid\s+)?(?:compact\s+)?JSON\b[\s\S]*$/i, "")
+    .replace(/\bReturn\s+compact\s+JSON\b[\s\S]*$/i, "")
+    .trim();
 }
 
 function extractQuotedTerms(text: string): string[] {
@@ -2915,8 +3046,8 @@ function extractRouteTerms(text: string): string[] {
   for (const match of text.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+([/A-Za-z0-9_{}/:.-]+)/gi)) {
     terms.push(match[1]!.trim());
   }
-  for (const match of text.matchAll(/\/[A-Za-z0-9_{}/:.-]{2,}/g)) {
-    terms.push(match[0].trim());
+  for (const match of text.matchAll(/(?:^|\s)(\/[A-Za-z0-9_{}:.-]+(?:\/[A-Za-z0-9_{}:.-]+)+)/g)) {
+    terms.push(match[1]!.trim());
   }
   return uniqueStrings(terms).slice(0, 8);
 }
@@ -2931,6 +3062,339 @@ function splitFlowTerms(target: string): string[] {
     ...normalized.split(/[^A-Za-z0-9_/-]+/).filter((term) => term.length >= 3),
     ...target.split(/[\/_.:-]+/).filter((term) => term.length >= 3)
   ]).slice(0, 10);
+}
+
+function extractStrongCodeLikeTaskTerms(text: string): string[] {
+  const terms: string[] = [];
+  for (const match of text.matchAll(/\b[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b/g)) {
+    if (!shouldSkipTaskAnchorTerm(match[0])) {
+      terms.push(match[0]);
+    }
+  }
+  for (const match of text.matchAll(/\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b/g)) {
+    if (!shouldSkipTaskAnchorTerm(match[0])) {
+      terms.push(match[0]);
+    }
+  }
+  for (const match of text.matchAll(/\b[A-Z][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\b/g)) {
+    const term = match[0];
+    if (
+      !/^(?:JSON|GET|POST|PUT|PATCH|DELETE|API|URL|HTTP|HTTPS)$/i.test(term) &&
+      !/^[A-Z0-9_]{2,6}$/.test(term) &&
+      !shouldSkipTaskAnchorTerm(term)
+    ) {
+      terms.push(term);
+    }
+  }
+  return uniqueStrings(terms).slice(0, 14);
+}
+
+function extractCodeLikeTaskTerms(text: string): string[] {
+  const terms: string[] = [...extractStrongCodeLikeTaskTerms(text)];
+  terms.push(...extractCueLowercaseTaskTerms(text));
+  return uniqueStrings(terms).slice(0, 18);
+}
+
+function extractCueLowercaseTaskTerms(text: string): string[] {
+  const terms: string[] = [];
+  const cuePattern = /\b(?:for|cover|covers|around|by|param|parameter|field|property|flag|route|endpoint|behavior|quality)\s+([a-z][a-z0-9]{5,})(?!-)(?:\s+and\s+([a-z][a-z0-9]{5,})(?!-))?/gi;
+  for (const match of text.matchAll(cuePattern)) {
+    for (const term of [match[1], match[2]]) {
+      if (term && !shouldSkipTaskAnchorTerm(term)) {
+        terms.push(term);
+      }
+    }
+  }
+  return uniqueStrings(terms).slice(0, 8);
+}
+
+function shouldSkipTaskAnchorTerm(term: string): boolean {
+  const lower = term.toLowerCase();
+  const compact = lower.replace(/[^a-z0-9]+/g, "");
+  return FLOW_GENERIC_SEARCH_TERMS.has(lower) ||
+    FLOW_GENERIC_SEARCH_TERMS.has(compact) ||
+    /^(?:tag|value|example|sample|foo|bar|baz)[a-z0-9]?$/i.test(term);
+}
+
+function extractHyphenatedIdentifierVariants(text: string): string[] {
+  const variants: string[] = [];
+  for (const match of text.matchAll(/\b[a-z][a-z0-9]+(?:-[a-z0-9]+)+\b/g)) {
+    const raw = match[0];
+    if (FLOW_GENERIC_SEARCH_TERMS.has(raw.toLowerCase())) {
+      continue;
+    }
+    const parts = raw.split("-").filter((part) => part.length > 0);
+    if (parts.length < 2) {
+      continue;
+    }
+    const camel = parts[0] + parts.slice(1).map(capitalizeAscii).join("");
+    variants.push(camel, capitalizeAscii(camel), raw);
+  }
+  return uniqueStrings(variants).slice(0, 18);
+}
+
+function capitalizeAscii(value: string): string {
+  return value ? value[0]!.toUpperCase() + value.slice(1) : value;
+}
+
+const FLOW_GENERIC_SEARCH_TERMS = new Set([
+  "actors",
+  "allowed",
+  "answer",
+  "api",
+  "application",
+  "behavior",
+  "business",
+  "called",
+  "changing",
+  "class",
+  "client",
+  "code",
+  "compact",
+  "concise",
+  "create",
+  "cover",
+  "daily",
+  "default",
+  "developer",
+  "diagram",
+  "evidence",
+  "explain",
+  "existing_coverage",
+  "existingcoverage",
+  "files",
+  "filter",
+  "filtering",
+  "flow",
+  "focus",
+  "focused",
+  "future",
+  "handoff",
+  "hardening",
+  "implementation",
+  "implementation_plan",
+  "implementationplan",
+  "integration",
+  "investigate",
+  "json",
+  "keys",
+  "likely",
+  "likely_root_causes",
+  "likelyrootcauses",
+  "missing",
+  "missing_coverage",
+  "missingcoverage",
+  "minimize",
+  "modify",
+  "on-call",
+  "oncall",
+  "only",
+  "plan",
+  "prepare",
+  "primary",
+  "produce",
+  "project",
+  "request",
+  "recall",
+  "results",
+  "rewrite",
+  "return",
+  "risks",
+  "route",
+  "search",
+  "shard",
+  "size",
+  "source",
+  "summary",
+  "symbols",
+  "target",
+  "target_behavior",
+  "targetbehavior",
+  "task",
+  "test",
+  "test_commands",
+  "testcommands",
+  "tests",
+  "tests_to_add",
+  "tests_to_run",
+  "teststoadd",
+  "teststorun",
+  "threshold",
+  "thinking",
+  "time",
+  "type",
+  "types",
+  "valid",
+  "window"
+]);
+
+function isUsefulFlowSearchTerm(term: string): boolean {
+  const cleaned = term.trim();
+  if (cleaned.length < 3) {
+    return false;
+  }
+  const normalized = cleaned.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized.length >= 3 && !FLOW_GENERIC_SEARCH_TERMS.has(normalized);
+}
+
+function selectExactFlowSearchTerms(searchTerms: string[]): string[] {
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  for (const term of searchTerms) {
+    const cleaned = term.trim();
+    const normalized = cleaned.toLowerCase();
+    if (!isUsefulFlowSearchTerm(cleaned)) {
+      continue;
+    }
+    const exactEnough = cleaned.includes("/") ||
+      cleaned.includes("_") ||
+      cleaned.includes("-") ||
+      /[a-z][A-Za-z0-9]*[A-Z]/.test(cleaned) ||
+      /^[A-Z][A-Za-z0-9_]{3,}$/.test(cleaned) ||
+      (/^[a-z][a-z0-9]{5,}$/.test(cleaned) && !FLOW_GENERIC_SEARCH_TERMS.has(normalized));
+    if (!exactEnough) {
+      continue;
+    }
+    const key = normalized.replace(/[^a-z0-9]+/g, "");
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    selected.push(cleaned);
+  }
+  return selected;
+}
+
+function collectFlowSearchHits(repoRoot: string, terms: string[]): FlowSearchHit[] {
+  const hits: FlowSearchHit[] = [];
+  for (const term of terms.slice(0, 4)) {
+    const result = runTargetedSearch(escapeRegex(term), repoRoot, repoRoot);
+    hits.push(...prioritizeFlowSearchHits(parseFlowSearchHits(result.rawOutput, term, repoRoot)).slice(0, 12));
+    if (hits.length >= 36) {
+      break;
+    }
+  }
+  return prioritizeFlowSearchHits(hits, terms).slice(0, 36);
+}
+
+function parseFlowSearchHits(rawOutput: string, term: string, repoRoot: string): FlowSearchHit[] {
+  const hits: FlowSearchHit[] = [];
+  for (const rawLine of rawOutput.replace(/\r\n/g, "\n").split("\n")) {
+    const match = rawLine.match(/^(.+?):(\d+):(.*)$/);
+    if (!match) {
+      continue;
+    }
+    const file = normalizeSearchHitPath(match[1]!, repoRoot);
+    if (!file || isProbablyBinaryPath(file) || /(^|\/)(node_modules|dist|build|target|\.git|vendor)\//i.test(file)) {
+      continue;
+    }
+    hits.push({
+      term,
+      file,
+      line: Number(match[2]),
+      preview: cleanFactValue(match[3] ?? "").slice(0, 180)
+    });
+  }
+  return hits;
+}
+
+function normalizeSearchHitPath(filePath: string, repoRoot: string): string {
+  const cleaned = filePath.trim().replace(/\\/g, "/");
+  if (!cleaned) {
+    return "";
+  }
+  const absoluteCandidate = path.isAbsolute(cleaned) ? cleaned : path.resolve(repoRoot, cleaned);
+  const relative = path.relative(repoRoot, absoluteCandidate).replace(/\\/g, "/");
+  if (relative && !relative.startsWith("..") && !path.isAbsolute(relative)) {
+    return relative;
+  }
+  return cleaned;
+}
+
+function prioritizeFlowSearchHits(hits: FlowSearchHit[], termOrder: string[] = []): FlowSearchHit[] {
+  const seen = new Set<string>();
+  const termRank = new Map(termOrder.map((term, index) => [term, index]));
+  return hits
+    .sort((a, b) =>
+      (termRank.get(a.term) ?? Number.MAX_SAFE_INTEGER) - (termRank.get(b.term) ?? Number.MAX_SAFE_INTEGER) ||
+      scoreFlowFile(b.file) - scoreFlowFile(a.file) ||
+      a.file.localeCompare(b.file) ||
+      a.line - b.line
+    )
+    .filter((hit) => {
+      const key = `${hit.file}:${hit.line}:${hit.term}`;
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    });
+}
+
+function formatFlowSearchHits(hits: FlowSearchHit[], limit: number): string {
+  return hits
+    .slice(0, limit)
+    .map((hit) => `${hit.term}->${hit.file}:${hit.line}:${hit.preview}`)
+    .join(" | ");
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function prioritizeFlowFiles(files: string[]): string[] {
+  return files.sort((a, b) => scoreFlowFile(b) - scoreFlowFile(a) || a.localeCompare(b));
+}
+
+function scoreFlowFile(filePath: string): number {
+  let score = 0;
+  if (isTestFlowFile(filePath)) {
+    score += 40;
+  }
+  if (isSourceFlowFile(filePath)) {
+    score += 35;
+  }
+  if (isEntrypointFlowFile(filePath)) {
+    score += 20;
+  }
+  if (isServiceFlowFile(filePath)) {
+    score += 18;
+  }
+  if (isDataFlowFile(filePath)) {
+    score += 10;
+  }
+  if (isGeneratedFlowFile(filePath)) {
+    score -= 35;
+  }
+  return score;
+}
+
+function isDailyTestPlanTask(task: string): boolean {
+  return /\b(unit\/integration test plan|unit tests?|integration tests?|unittest|write tests?|add tests?|test plan|test strategy|test coverage)\b/i.test(task);
+}
+
+function isSourceFlowFile(filePath: string): boolean {
+  return /\.(ts|tsx|js|jsx|java|py|go|rs|kt|scala|cs)$/i.test(filePath) && !isTestFlowFile(filePath) && !isGeneratedFlowFile(filePath);
+}
+
+function isTestFlowFile(filePath: string): boolean {
+  return /(^|\/)(test|tests|src\/test|qa|__tests__)(\/|$)|(?:Test|Tests|Spec)\.[A-Za-z0-9]+$|\.(test|spec)\.(ts|tsx|js|jsx)$/i.test(filePath);
+}
+
+function isGeneratedFlowFile(filePath: string): boolean {
+  return /(^|\/)(generated|gen|target\/generated-sources|build\/generated|dist)\//i.test(filePath) || /\.gen\./i.test(filePath);
+}
+
+function isEntrypointFlowFile(filePath: string): boolean {
+  return /(?:controller|resource|rest|route|routes|handler|endpoint|web|api|command|resolver|page|view|action)/i.test(filePath);
+}
+
+function isServiceFlowFile(filePath: string): boolean {
+  return /(?:service|manager|processor|workflow|flow|usecase|facade|application|domain|action|transport|builder|operation)/i.test(filePath);
+}
+
+function isDataFlowFile(filePath: string): boolean {
+  return /(?:model|entity|schema|repository|dao|store|state|event|message|request|response|dto|timestamp|util|utils|operation)/i.test(filePath);
 }
 
 function pathMatchesTerms(filePath: string, terms: string[]): boolean {
@@ -4238,7 +4702,9 @@ function buildAnswerContract(
         evidence_rules: [
           ...commonEvidenceRules,
           "Each flow edge must cite a matched file/symbol or be marked inferred.",
-          "If only candidate files are known, describe them as candidates and run/read allowed followups before drawing a definitive diagram."
+          answerable
+            ? "Use exact_matches and implementation_files/test_files from the flow packet; do not run redundant followups for the same anchors."
+            : "If only candidate files are known, describe them as candidates and run/read allowed followups before drawing a definitive diagram."
         ],
         quality_checks: [
           "Names the exact flow target and does not drift to whole-repo overview.",

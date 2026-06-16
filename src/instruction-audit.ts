@@ -80,7 +80,7 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
       "- Investigate a broad failure surface before choosing exact files",
       "```",
       "",
-      "Native Copilot prompt files may also be installed under `.github/prompts`: `/trace-bug`, `/flow-trace`, `/write-unittest`, `/implement-feature`, `/pbi-plan`, `/requirement-analysis`, `/security-audit`, `/review-code`, `/performance-analysis`, `/dependency-analysis`, `/spec-feature-plan`, and more.",
+      "Native Copilot prompt files may also be installed under `.github/prompts`: `/investigate-flow`, `/flow-trace`, `/e2e-trace-flow`, `/trace-bug`, `/bug-trace`, `/write-unittest`, `/write-unittest-class`, `/investigate-pbi`, `/implement-feature`, `/pbi-plan`, `/requirement-analysis`, `/security-audit`, `/review-code`, `/performance-analysis`, `/dependency-analysis`, `/refactor-code`, `/spec-feature-plan`, and more.",
       "",
       "Workflow:",
       "",
@@ -111,7 +111,7 @@ export function emitTokenOptInstructions(target: InstructionTarget = "generic"):
     "- Unit-test planning before writing tests",
     "```",
     "",
-    "If `.github/prompts` is installed, users may call native Copilot prompt files such as `/trace-bug`, `/flow-trace`, `/write-unittest`, `/implement-feature`, `/pbi-plan`, `/requirement-analysis`, `/security-audit`, `/review-code`, `/performance-analysis`, `/dependency-analysis`, `/spec-feature-plan`, or `/promote-review-memory`. Treat those prompt files as normal user intent plus the routing rules in this instruction file.",
+    "If `.github/prompts` is installed, users may call native Copilot prompt files such as `/investigate-flow`, `/flow-trace`, `/e2e-trace-flow`, `/trace-bug`, `/bug-trace`, `/write-unittest`, `/write-unittest-class`, `/investigate-pbi`, `/implement-feature`, `/pbi-plan`, `/requirement-analysis`, `/security-audit`, `/review-code`, `/performance-analysis`, `/dependency-analysis`, `/refactor-code`, `/spec-feature-plan`, or `/promote-review-memory`. Treat those prompt files as normal user intent plus the routing rules in this instruction file.",
     "",
     "Quality-first routing guardrails:",
     "",
@@ -397,6 +397,42 @@ const TOKENOPT_NATIVE_PROMPTS: NativePromptTemplate[] = [
     ]
   },
   {
+    fileName: "investigate-flow.prompt.md",
+    name: "investigate-flow",
+    description: "Investigate an unknown or partially-known product/code flow with bounded evidence.",
+    argumentHint: "<flow, symptom, endpoint, class, behavior, or business area>",
+    body: [
+      "Investigate the provided flow or behavior and produce an evidence-backed handoff. Return compact JSON.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- If CodeGraph MCP is available and indexed, use CodeGraph as the source-of-truth for files, symbols, tests, and flow edges.",
+      "- If TokenOpt MCP is available, use it as the slot checklist for summary, invariants, risks, tests, and missing coverage.",
+      "- TokenOpt-only mode: call TokenOpt once, then only exact allowed followups for missing named slots.",
+      "- CodeGraph-only mode: use one flow/research/change pack first; do not fall back to broad shell reads.",
+      "- TokenOpt+CodeGraph mode: TokenOpt defines required slots, CodeGraph fills source evidence; stop when slots are complete.",
+      "- If neither MCP can name exact evidence, use one exact anchor search and one bounded slice read, then mark gaps.",
+      "",
+      "JSON keys: status, acquisition_path, summary, flow, invariants, files, symbols, tests_to_run, risks, missing_coverage."
+    ]
+  },
+  {
+    fileName: "e2e-trace-flow.prompt.md",
+    name: "e2e-trace-flow",
+    description: "Trace an end-to-end user/API flow with ordered evidence and tests.",
+    argumentHint: "<endpoint, UI action, job, message, class, or behavior>",
+    body: [
+      "Trace the provided end-to-end flow from entrypoint through domain/storage/dependencies to tests. Return compact JSON unless the user asks for Mermaid.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- Prefer CodeGraph flow evidence when the target names an endpoint, UI action, job, message, class, or behavior.",
+      "- Use TokenOpt only as a completeness checklist for business invariants, tests, risks, and unresolved edges.",
+      "- Do not run repo-wide exploration. Use exact followups only for one missing edge at a time.",
+      "- Mark inferred edges explicitly; do not present candidate files as confirmed flow proof.",
+      "",
+      "JSON keys: status, acquisition_path, entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, risks."
+    ]
+  },
+  {
     fileName: "implement-feature.prompt.md",
     name: "implement-feature",
     description: "Implement or plan a concrete feature with targeted validation.",
@@ -442,6 +478,24 @@ const TOKENOPT_NATIVE_PROMPTS: NativePromptTemplate[] = [
       "- Keep any followup exact and bounded.",
       "",
       "JSON keys: status, requirement_summary, impacted_areas, implementation_plan, tests, compatibility_risks, missing_items, next_steps."
+    ]
+  },
+  {
+    fileName: "investigate-pbi.prompt.md",
+    name: "investigate-pbi",
+    description: "Investigate a concrete PBI before planning or editing.",
+    argumentHint: "<PBI text, ticket URL, or acceptance criteria>",
+    body: [
+      "Investigate the provided PBI before planning edits. Return compact JSON.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- If no PBI, requirement body, ticket URL, or acceptance criteria is provided, ask for the artifact and do not inspect the repo.",
+      "- Use TokenOpt to extract business slots: user value, acceptance criteria, compatibility constraints, unknowns, risks, and validation.",
+      "- Use CodeGraph to ground impacted files, symbols, tests, and current behavior when an index is available.",
+      "- In TokenOpt-only mode, stop after one packet plus exact allowed followups.",
+      "- In CodeGraph-only mode, use a research/change pack and mark business assumptions that are not in the PBI.",
+      "",
+      "JSON keys: status, pbi_summary, business_flow, acceptance_criteria, current_behavior, impacted_files, symbols, tests, unknowns, risks, next_steps."
     ]
   },
   {
@@ -493,6 +547,24 @@ const TOKENOPT_NATIVE_PROMPTS: NativePromptTemplate[] = [
     ]
   },
   {
+    fileName: "refactor-code.prompt.md",
+    name: "refactor-code",
+    description: "Plan a behavior-preserving refactor with exact usages, tests, and validation.",
+    argumentHint: "<symbol, module, API, migration, resource, or behavior>",
+    body: [
+      "Plan the provided refactor with behavior invariants first. Return compact JSON unless the user explicitly asks for edits.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- If the target symbol/file/API is exact, use CodeGraph references or native narrow reads for definitions, usages, tests, and contracts.",
+      "- Use TokenOpt as the checklist for behavior invariants, compatibility risks, and validation coverage.",
+      "- In CodeGraph-only mode, start with get_change_pack or references; do not broaden to repo overview.",
+      "- In TokenOpt+CodeGraph mode, combine TokenOpt risk slots with CodeGraph exact impact evidence.",
+      "- Do not propose behavior changes unless they are explicitly required.",
+      "",
+      "JSON keys: status, refactor_goal, current_flow, definitions, usages, files, symbols, safe_steps, tests, validation_commands, risks."
+    ]
+  },
+  {
     fileName: "repo-benchmark-analysis.prompt.md",
     name: "repo-benchmark-analysis",
     description: "Analyze a repository as a benchmark target with cost and task-class risks.",
@@ -523,6 +595,24 @@ const TOKENOPT_NATIVE_PROMPTS: NativePromptTemplate[] = [
       "- For write_unittest, use at most one additional allowed MCP followup after compile_evidence.",
       "",
       "JSON keys: status, target, behavior, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, missing_items."
+    ]
+  },
+  {
+    fileName: "write-unittest-class.prompt.md",
+    name: "write-unittest-class",
+    description: "Plan or write class-level unit tests for a concrete class/module behavior.",
+    argumentHint: "<class/module/file and behavior>",
+    body: [
+      "Plan or write focused class-level unit tests for the provided target and behavior. Return JSON unless the user asks for code edits.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- Require a concrete class, module, file, method, behavior, failing case, or acceptance criterion.",
+      "- If the target is missing, ask for target/behavior and do not search the repo to guess it.",
+      "- CodeGraph-only mode: use get_change_pack with changeType=test or find_tests_for/search_symbol for the named class and existing tests.",
+      "- TokenOpt-only mode: use write_unittest/coding coverage once, then one exact followup at most.",
+      "- TokenOpt+CodeGraph mode: use TokenOpt for coverage slots and CodeGraph for source/test anchors.",
+      "",
+      "JSON keys: status, target_class, behavior, existing_coverage, missing_coverage, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, risks."
     ]
   },
   {
@@ -606,6 +696,24 @@ const TOKENOPT_NATIVE_PROMPTS: NativePromptTemplate[] = [
       "- If no concrete bug artifact is provided, ask for failing test, stack trace/error output, repro steps, expected vs actual behavior, or target symbol.",
       "",
       "JSON keys: status, acquisition_path, bug_summary, evidence_chain, suspected_root_cause, affected_files, targeted_fix_location, verification, missing_items."
+    ]
+  },
+  {
+    fileName: "bug-trace.prompt.md",
+    name: "bug-trace",
+    description: "Trace a concrete bug from failure evidence to likely owner code and validation.",
+    argumentHint: "<failing test, stack trace, repro, endpoint, file, class, function, or behavior>",
+    body: [
+      "Trace the provided bug from concrete evidence to likely root cause and fix handoff. Return compact JSON.",
+      "",
+      "TokenOpt/CodeGraph routing:",
+      "- Start from the failure artifact: failing test, stack frame, error output, repro steps, endpoint, file, class, function, or exact behavior.",
+      "- For long logs, use TokenOpt failure compression before any source reads.",
+      "- For indexed repos, use CodeGraph flow/change evidence to map the failure to owner symbols and tests.",
+      "- Avoid broad repo exploration; use exact followups only for missing owner/test evidence.",
+      "- If no concrete bug artifact exists, ask for repro, expected vs actual, failing test, stack trace, or target symbol.",
+      "",
+      "JSON keys: status, acquisition_path, bug_summary, reproduction_path, evidence_chain, root_cause_hypotheses, affected_files, symbols, fix_plan, tests_to_run, risks."
     ]
   },
   {

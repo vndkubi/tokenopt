@@ -256,6 +256,9 @@ function hasConcreteArtifact(task: string, signals: string[]): boolean {
   if (signals.some((signal) => signal.startsWith("file:") || signal.startsWith("symbol:") || signal === "diff:inline" || signal === "review:branch-pair")) {
     return true;
   }
+  if (hasConcreteBehaviorAnchor(task)) {
+    return true;
+  }
   return /https?:\/\/\S+/i.test(task) ||
     /\b(?:PBI|PB|REQ|ISSUE|BUG|TASK|JIRA|GH|PR)[-_]?\d+\b/i.test(task) ||
     /#\d{2,}\b/.test(task) ||
@@ -264,6 +267,79 @@ function hasConcreteArtifact(task: string, signals: string[]): boolean {
     /\b(?:requirement|pbi|acceptance criteria|completed task|task summary|transcript|diff|changed files?|risky surface|behavior)\s*:\s*\S.{20,}/is.test(task) ||
     /```[\s\S]{20,}```/.test(task) ||
     /[`"'][^`"']{20,}[`"']/.test(task);
+}
+
+function hasConcreteBehaviorAnchor(task: string): boolean {
+  const anchorTask = stripRouterOutputContractText(task);
+  return /\b(?:GET|POST|PUT|PATCH|DELETE)\s+\/[A-Za-z0-9_./{}:-]+/i.test(anchorTask) ||
+    /(?:^|\s)\/[A-Za-z0-9_{}:-]+(?:\/[A-Za-z0-9_{}:-]+)+/.test(anchorTask) ||
+    hasConcreteIdentifierAnchor(anchorTask) ||
+    hasConcreteHyphenAnchor(anchorTask) ||
+    /\b(?:route|endpoint|api|request\s+param|query\s+param|parameter|field|property|flag|config)\s+(?:for|around|of|called|named|by|on|in)?\s*[`"']?[A-Za-z0-9_./:-]{5,}/i.test(anchorTask) ||
+    /\b(?:behavior|flow)\s*:\s*\S.{12,}/i.test(anchorTask) ||
+    /\b(?:behavior|flow)\s+(?:for|around|of|called|named)\s+[`"']?[A-Za-z0-9_./:-]{5,}/i.test(anchorTask);
+}
+
+function stripRouterOutputContractText(text: string): string {
+  return text.replace(/\bReturn\s+(?:valid\s+)?(?:compact\s+)?JSON\b[\s\S]*$/i, "").trim();
+}
+
+const GENERIC_HYPHEN_ANCHORS = new Set([
+  "end-to-end",
+  "integration-test",
+  "line-level",
+  "on-call",
+  "test-plan",
+  "unit-test"
+]);
+
+const GENERIC_IDENTIFIER_ANCHORS = new Set([
+  "existing_coverage",
+  "existingcoverage",
+  "implementation_plan",
+  "implementationplan",
+  "likely_root_causes",
+  "likelyrootcauses",
+  "missing_coverage",
+  "missingcoverage",
+  "target_behavior",
+  "targetbehavior",
+  "test_commands",
+  "testcommands",
+  "tests_to_add",
+  "tests_to_run",
+  "teststoadd",
+  "teststorun"
+]);
+
+function hasConcreteIdentifierAnchor(task: string): boolean {
+  for (const match of task.matchAll(/\b[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b/g)) {
+    if (!isGenericIdentifierAnchor(match[0])) {
+      return true;
+    }
+  }
+  for (const match of task.matchAll(/\b[a-z][a-z0-9]+(?:_[a-z0-9]+)+\b/g)) {
+    if (!isGenericIdentifierAnchor(match[0])) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function isGenericIdentifierAnchor(value: string): boolean {
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return GENERIC_IDENTIFIER_ANCHORS.has(value.toLowerCase()) ||
+    GENERIC_IDENTIFIER_ANCHORS.has(normalized) ||
+    /^(?:tag|value|example|sample|foo|bar|baz)[a-z0-9]?$/i.test(value);
+}
+
+function hasConcreteHyphenAnchor(task: string): boolean {
+  for (const match of task.matchAll(/\b[a-z][a-z0-9]+(?:-[a-z0-9]+)+\b/g)) {
+    if (!GENERIC_HYPHEN_ANCHORS.has(match[0].toLowerCase())) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function missingArtifactTaskType(task: string, prompt: string, requestedTaskType?: EvidenceTaskType): EvidenceTaskType {
@@ -355,7 +431,34 @@ function collectPromptSignals(task: string): string[] {
   if (/\bconfluence\b|\/wiki\/spaces\/|\/pages\/viewpage\.action/i.test(task)) {
     signals.push("business:confluence");
   }
+  for (const anchor of collectConcreteBehaviorAnchors(task).slice(0, 6)) {
+    signals.push(`anchor:${anchor}`);
+  }
   return [...new Set(signals)].slice(0, 16);
+}
+
+function collectConcreteBehaviorAnchors(task: string): string[] {
+  const anchorTask = stripRouterOutputContractText(task);
+  const anchors: string[] = [];
+  for (const match of anchorTask.matchAll(/\b(?:GET|POST|PUT|PATCH|DELETE)\s+(\/[A-Za-z0-9_./{}:-]+)/gi)) {
+    anchors.push(match[1]!);
+  }
+  for (const match of anchorTask.matchAll(/(?:^|\s)(\/[A-Za-z0-9_{}:-]+(?:\/[A-Za-z0-9_{}:-]+)+)/g)) {
+    anchors.push(match[1]!);
+  }
+  for (const match of anchorTask.matchAll(/\b[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b/g)) {
+    if (isGenericIdentifierAnchor(match[0])) {
+      continue;
+    }
+    anchors.push(match[0]);
+  }
+  for (const match of anchorTask.matchAll(/\b[a-z][a-z0-9]+(?:[_-][a-z0-9]+)+\b/g)) {
+    if (GENERIC_HYPHEN_ANCHORS.has(match[0].toLowerCase()) || isGenericIdentifierAnchor(match[0])) {
+      continue;
+    }
+    anchors.push(match[0]);
+  }
+  return [...new Set(anchors)].slice(0, 12);
 }
 
 function isReviewPrompt(prompt: string): boolean {

@@ -64,13 +64,19 @@ Good Copilot slash prompts after setup:
 
 ```text
 /business-deep-dive checkout payments
+/investigate-flow checkout payments
 /flow-trace checkout API flow
+/e2e-trace-flow checkout API flow
 /trace-bug failing checkout authorization test
+/bug-trace failing checkout authorization test
 /write-unittest OrderService payment authorization
+/write-unittest-class OrderService payment authorization
 /security-audit <diff or PR scope>
 /review-code <diff>
+/investigate-pbi <PBI or acceptance criteria>
 /pbi-plan <requirement text or ticket URL>
 /refactor-scope OrderService validation extraction
+/refactor-code OrderService validation extraction
 /performance-analysis checkout latency
 /build-handoff
 ```
@@ -79,12 +85,13 @@ Prompt pack coverage against the 37-prompt benchmark:
 
 | Benchmark prompts | Reusable Copilot prompt | Notes |
 | --- | --- | --- |
-| `U1`, `U7`, `J4` | `/flow-trace` | Exact entrypoint/endpoint/class means native narrow search/read first; unknown broad flow may use TokenOpt once. |
-| `U2`, `U6` | `/pbi-plan` | Requires concrete PBI/requirement/ticket/acceptance criteria; otherwise ask and do not inspect repo. |
-| `U3`, `S8` | `/write-unittest` | Requires concrete class/module/file/behavior; full mode may use coding coverage once. |
+| `U1` | `/investigate-flow` or `/flow-trace` | Exact entrypoint/endpoint/class means native narrow search/read first; unknown broad flow may use TokenOpt/CodeGraph once. |
+| `U7`, `J4` | `/e2e-trace-flow` or `/flow-trace` | Use ordered flow evidence and mark inferred edges. |
+| `U2`, `U6` | `/pbi-plan` or `/investigate-pbi` | Requires concrete PBI/requirement/ticket/acceptance criteria; otherwise ask and do not inspect repo. |
+| `U3`, `S8` | `/write-unittest` or `/write-unittest-class` | Requires concrete class/module/file/behavior; full mode may use coding coverage once. |
 | `U4` | `/requirement-analysis` | Requires requirement text or URL; missing artifact is `needs_input_bypass`. |
 | `U5` | `/repo-benchmark-analysis` | Broad repo benchmark/readiness task; TokenOpt-first is appropriate. |
-| `U8`, `S4`, `J6`, `J10`, `J11` | `/trace-bug` | Use `tokenopt_failure_packet` for long logs; otherwise native narrow search/read from failing test, stack frame, or repro. |
+| `U8`, `S4`, `J6`, `J10`, `J11` | `/trace-bug` or `/bug-trace` | Use `tokenopt_failure_packet` for long logs; otherwise native narrow search/read from failing test, stack frame, or repro. |
 | `U9`, `J14` | `/performance-analysis` | Measurement-first; exact endpoint/query/module uses narrow reads. |
 | `U10` | `/security-audit` | Requires concrete diff/scope/risky surface and security coverage dimensions. |
 | `U11` | `/dependency-analysis` | Use broad build facts only when needed; avoid lockfiles unless the dependency question requires them. |
@@ -92,12 +99,12 @@ Prompt pack coverage against the 37-prompt benchmark:
 | `S1` | `/spec-autorun` | SpecKit phase/checkpoint planning with evidence reuse. |
 | `S2`, `S6`, `J5` | `/implement-feature` | Use for feature implementation planning; known target bypasses broad ContextGate. |
 | `S3`, `J2`, `J9`, `J12`, `J13`, `J15` | `/review-code` | Diff-first review; no diff/scope means ask instead of exploring. Use `/security-audit` only for security-focused review. |
-| `S5`, `J3`, `J7`, `J8` | `/refactor-scope` | Scope definitions/usages/config/tests/contracts before edits. |
+| `S5`, `J3`, `J7`, `J8` | `/refactor-scope` or `/refactor-code` | Scope definitions/usages/config/tests/contracts before edits. |
 | `S7` | `/spec-feature-plan` | Feature specification and acceptance criteria from repo/domain evidence. |
 | `S9` | `/promote-review-memory` | Requires completed-task summary/diff/transcript/review outcome. |
 | `S10` | `/context-budget` | Context budget and compaction checkpoint planning. |
 
-Additional reusable prompts outside the 37-prompt suite: `/business-deep-dive`, `/build-handoff`, and `/field-impact`.
+Additional reusable prompts outside the 37-prompt suite: `/business-deep-dive`, `/build-handoff`, `/field-impact`, plus daily aliases such as `/investigate-flow`, `/write-unittest-class`, `/investigate-pbi`, `/e2e-trace-flow`, `/bug-trace`, and `/refactor-code`.
 
 Good explicit smoke-test prompt:
 
@@ -146,6 +153,234 @@ If answerable=true, answer from the packet and do not call shell/search again.
 
 Task:
 Investigate the primary user/business flow in this repository. Return files, symbols, terms, risks, and evidence.
+```
+
+## Large-Repo Daily Prompt Matrix
+
+For repositories in the 10k-70k file range, the main cost problem is not one expensive answer. It is repeated broad acquisition during investigate, planning, implementation, unit-test writing, and review. Use the prompt contract to force one evidence path and one synthesis path.
+
+Before using CodeGraph-heavy prompts or benchmark modes on a large repo, verify readiness:
+
+```powershell
+node <code-graph-repo>\dist\cli.js doctor --root <target-repo>
+node <code-graph-repo>\dist\cli.js setup --root <target-repo> --workspace-key <target-repo>
+node <code-graph-repo>\dist\cli.js index --root <target-repo> --workspace-key <target-repo> --quiet
+```
+
+If the SQLite graph/artifacts are missing, setup/index fails, or the repo has no current snapshot for the same workspace key, do not treat CodeGraph benchmark results as valid. Fix readiness first or use the bounded hybrid fallback route.
+
+Hybrid fallback contract:
+
+```text
+Use TokenOpt as the slot checklist and CodeGraph as the preferred evidence provider.
+
+If CodeGraph returns an error/timeout/unavailable index, or if required slots still lack concrete repo-relative files/symbols/tests after the allowed CodeGraph calls:
+- Run one exact bounded rg query from the named anchors in the task.
+- Batch all selected reads into one shell command and read only small slices around at most 4 selected hits.
+- Optionally run one targeted test search for a concrete owner symbol or behavior term.
+- Do not run rg --files, broad directory listings, broad whole-file reads, or repo-wide exploration.
+- Hard stop after 3 shell calls; if evidence is still incomplete, mark the gap instead of continuing exploration.
+- Mark fallback usage in risks/notes/missing_coverage/open_questions.
+
+Then answer only from evidence gathered by TokenOpt, CodeGraph, and that bounded fallback.
+```
+
+Recommended default:
+
+| Daily use case | Best first route | Why | Avoid |
+| --- | --- | --- | --- |
+| Broad investigate / unknown owner | TokenOpt+CodeGraph when CodeGraph is ready; `tokenopt-codegraph-hybrid` otherwise | TokenOpt supplies the quality slots; CodeGraph supplies file/symbol/test evidence; hybrid preserves quality when CodeGraph is unhealthy | TokenOpt packet plus repo-wide shell fallback |
+| Exact flow trace with known endpoint/class/symbol | CodeGraph-only or native narrow search/read | Needs concrete path proof, not broad summaries | Broad TokenOpt first when exact target is already named |
+| E2E trace flow | CodeGraph-only or TokenOpt+CodeGraph | Needs ordered flow edges, tests, and inferred-edge marking | Candidate-file lists presented as definitive flow proof |
+| Investigate PBI | TokenOpt+CodeGraph or hybrid fallback when CodeGraph is not ready | Requirement needs business slots, impacted files, unknowns, risks, and validation | Planning from generic business text without code anchors |
+| Plan PBI / implementation handoff | TokenOpt+CodeGraph using change-pack evidence; hybrid fallback for missing anchors | Must map acceptance criteria to edit surfaces and tests | Full implementation before impact scope is known |
+| Implement code + unit tests | CodeGraph change pack or narrow reads first; TokenOpt as coverage checklist for unknown owners | Edits need exact files, tests, and validation commands | Accepting `answerable=true` without owner symbol/test coverage |
+| Unit-test planning / write-unittest-class | CodeGraph change pack + symbol/test search | Existing tests and owner methods matter more than prose | Listing generic test ideas |
+| Performance analysis | TokenOpt+CodeGraph | TokenOpt enforces cost model; CodeGraph grounds hotspots and validation | Optimizations without measurement plan |
+| Security audit | Diff/scope-first TokenOpt or CodeGraph review packet | Requires concrete security scope and explicit boundaries | Broad vulnerability hunting without scope |
+| Code review | Diff-first, then CodeGraph review evidence, TokenOpt review checklist | Review must cover technical bugs, business fit, similar logic, and missing tests | Per-commit review or no-diff repo exploration |
+| Field/schema impact | CodeGraph/native references first | Impact is usually exact symbol/reference work | Broad repo overview before references |
+| Runtime/tracebug with stack/failing test | Failure packet or native narrow read | Start from failure artifact | Asking the agent to rediscover the repo |
+
+Production route prompt:
+
+```text
+Choose exactly one evidence route first.
+
+For a large repo:
+- If this is broad investigate, PBI investigation, PBI planning, implementation handoff, or unknown-owner implementation, use TokenOpt+CodeGraph when both are available.
+- If this is an exact endpoint/class/symbol/field trace, use CodeGraph or native narrow search/read directly.
+- If this is code review, start from the net diff/patch, then use CodeGraph review evidence or narrow reads for unclear impact.
+- If TokenOpt says answerable=true, do not repeat the same evidence acquisition with shell/search/read.
+- If evidence is incomplete, use only one named exact followup for the weakest missing slot.
+
+Return:
+- acquisition_path
+- evidence_complete: yes/no
+- files
+- symbols
+- business_or_behavior_invariants
+- tests_or_validation
+- risks_or_unknowns
+- final_answer
+
+Task:
+<your real task>
+```
+
+## Daily Prompt Contracts
+
+### Investigate Unknown Owner
+
+```text
+Use TokenOpt+CodeGraph as the first evidence route if available.
+TokenOpt is the slot checklist; CodeGraph is the source-of-truth for files, symbols, tests, and flows.
+Do not use shell fallback unless both tools cannot name the missing slot.
+
+Task:
+Investigate <symptom/business area/behavior>.
+
+Return valid compact JSON only with:
+summary, flow, likely_root_causes, files, symbols, tests_to_run, implementation_plan, risks.
+```
+
+### Trace Flow
+
+```text
+This is a trace-flow task.
+Use CodeGraph or native narrow search/read directly.
+Start from <endpoint/class/symbol>, follow controller/API, service/domain, repository/storage, and caller/UI paths.
+Do not run broad repo exploration.
+
+Return valid compact JSON only with:
+entrypoint, sequence, invariants, files, symbols, tests_to_run, risks.
+```
+
+### E2E Trace Flow
+
+```text
+Use CodeGraph flow evidence first for <endpoint/UI action/job/message/class/behavior>.
+Trace entrypoint, domain/service, storage/dependency, caller/UI, tests, and inferred edges.
+Use TokenOpt only as a completeness checklist for invariants, tests, and risks.
+
+Return valid compact JSON only with:
+entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, risks.
+```
+
+### Investigate PBI
+
+```text
+Use TokenOpt+CodeGraph first.
+Treat the PBI as the requirement artifact and the repo as evidence. Separate known behavior, unknowns, and proposed scope.
+
+PBI:
+<paste PBI and acceptance criteria>
+
+Return valid compact JSON only with:
+pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps.
+```
+
+### Plan PBI
+
+```text
+Use TokenOpt+CodeGraph first.
+Use CodeGraph change-pack evidence for owner files, symbols, likely tests, invariants, and validation commands.
+Do not edit files.
+
+PBI:
+<paste PBI and acceptance criteria>
+
+Return valid compact JSON only with:
+scope, out_of_scope, impacted_files, symbols, implementation_steps, tests, validation_commands, risks.
+```
+
+### Write Unittest Class
+
+```text
+Use CodeGraph change/test evidence for <class/module/file and behavior>.
+Use TokenOpt as a coverage checklist if existing tests, assertions, fixtures, or validation commands are incomplete.
+If the target is missing, ask for it instead of searching the repo to guess.
+
+Return valid compact JSON only with:
+target_class, behavior, existing_coverage, missing_coverage, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, risks.
+```
+
+### Implementation Handoff
+
+```text
+Prepare an implementation handoff, not code edits.
+Use TokenOpt+CodeGraph if the owner area is not already known.
+Every implementation step must name a file, symbol, or test surface.
+
+Task:
+<feature/change request>
+
+Return valid compact JSON only with:
+owner_flow, files_to_change, symbols, implementation_steps, test_plan, validation_commands, compatibility_risks, open_questions.
+```
+
+### Implement Code + Unit Tests
+
+```text
+This is an implementation task.
+
+Choose the cheapest evidence path first:
+- Known owner file/module -> native narrow read/search and targeted validation.
+- Unknown owner in a large repo -> CodeGraph change pack, with TokenOpt as coverage checklist if available.
+- Do not accept evidence as complete unless owner symbol, edit surface, related tests, invariants, and validation command are known.
+
+Task:
+Implement <PBI/change>.
+
+Requirements:
+- Smallest scoped code change.
+- Add/update targeted unit tests.
+- Preserve compatibility and existing behavior outside the PBI.
+- Run the narrowest relevant tests.
+- Report changed files and validation result.
+```
+
+### Code Review
+
+```text
+Review the net diff/patch, not individual commits.
+Use CodeGraph review evidence or narrow reads for changed call flow, similar logic, and tests.
+Use TokenOpt as the review checklist when available.
+
+Check all of:
+- syntax/runtime bugs
+- correctness and regressions
+- business requirement coverage
+- edge cases and state transitions
+- similar logic that may need the same change
+- missing tests and risky untested behavior
+- security, performance, compatibility, and resource lifecycle
+
+Return valid compact JSON only with:
+findings, business_coverage, similar_logic, missing_tests, files, symbols, risks, review_status.
+Findings must be actionable and introduced by the diff.
+```
+
+### Performance Analysis
+
+```text
+Use TokenOpt+CodeGraph.
+TokenOpt supplies the cost-model and validation slots; CodeGraph grounds the code path, likely hotspots, tests, and benchmark commands.
+Do not propose fixes before measurement points and correctness risks are named.
+
+Return valid compact JSON only with:
+target, suspected_hotspots, cost_model, measurements, optimization_options, validation_commands, risks, evidence_used.
+```
+
+### Security Audit
+
+```text
+Review the concrete diff/scope/risky surface first.
+Use TokenOpt security_audit or CodeGraph review_patch evidence. Do not run broad vulnerability hunting.
+Separate exploitable findings, non-findings, and missing security coverage.
+
+Return valid compact JSON only with:
+status, findings, evidence_used, missing_coverage, non_findings, next_steps.
 ```
 
 ## Benchmark-Backed Routing Table

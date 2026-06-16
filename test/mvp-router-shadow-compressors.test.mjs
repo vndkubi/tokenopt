@@ -31,6 +31,19 @@ test("router classifies review, debug, refactor, exact, and small-repo bypass ta
   assert.equal(routeTask({ task: "Create an implementation plan for a small PBI/requirement while preserving compatibility. Return JSON." }).taskClass, "needs_input_bypass");
   assert.equal(routeTask({ task: "Analyze a requirement and produce WHAT, WHY, HOW, acceptance criteria, impacted areas, tests, and unknowns. Return JSON." }).taskClass, "needs_input_bypass");
   assert.equal(routeTask({ task: "Write a unit-test plan for the likely owning class/module of a behavior. Return JSON." }).taskClass, "needs_input_bypass");
+  const anchoredTestPlan = routeTask({
+    task: "Daily task: create a focused test plan for search pre-filtering/can-match behavior. Cover pre_filter_shard_size request param.",
+    requestedTaskType: "api_flow"
+  });
+  assert.equal(anchoredTestPlan.taskClass, "broad_flow");
+  assert.equal(anchoredTestPlan.promptSignals.includes("artifact:missing"), false);
+  assert.equal(anchoredTestPlan.promptSignals.includes("anchor:pre_filter_shard_size"), true);
+  const camelCaseTestPlan = routeTask({
+    task: "Daily task: prepare a unit/integration test plan for hardening YARN RM app filtering by applicationTypes and applicationTags.",
+    requestedTaskType: "api_flow"
+  });
+  assert.equal(camelCaseTestPlan.taskClass, "broad_flow");
+  assert.equal(camelCaseTestPlan.promptSignals.includes("anchor:applicationTypes"), true);
   assert.equal(routeTask({ task: "Identify what should be promoted into review memory after a completed task. Return JSON." }).taskClass, "needs_input_bypass");
   const failureRoute = routeTask({ task: "Debug this Spring stack trace\njava.lang.NullPointerException\n\tat com.acme.OrderService.load(OrderService.java:42)" });
   assert.equal(failureRoute.taskClass, "debug_runtime");

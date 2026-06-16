@@ -695,6 +695,70 @@ test("mcp does not mark target-specific business task answerable without target 
   );
 });
 
+test("mcp compiles daily flow evidence from exact behavior anchors", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-daily-flow-repo-"));
+  fs.mkdirSync(path.join(repo, "server", "src", "main", "java", "org", "example", "search"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "server", "src", "test", "java", "org", "example", "search"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "daily-flow-fixture", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(repo, "server", "src", "main", "java", "org", "example", "search", "RestSearchAction.java"),
+    [
+      "class RestSearchAction {",
+      "  void parseSearchRequest(Request request, SearchRequest searchRequest) {",
+      "    searchRequest.setPreFilterShardSize(request.paramAsInt(\"pre_filter_shard_size\", -1));",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "server", "src", "main", "java", "org", "example", "search", "TransportSearchAction.java"),
+    [
+      "class TransportSearchAction {",
+      "  boolean shouldPreFilterSearchShards(SearchRequest request) {",
+      "    return request.getPreFilterShardSize() != null || request.canMatch();",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "server", "src", "test", "java", "org", "example", "search", "TransportSearchActionTests.java"),
+    [
+      "class TransportSearchActionTests {",
+      "  void testPreFilterShardSizeCanMatch() {",
+      "    assertTrue(action.shouldPreFilterSearchShards(requestWith(\"pre_filter_shard_size\", \"1\")));",
+      "    assertTrue(request.canMatch());",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+
+  await withTokenOptMcp(
+    async (client) => {
+      const packet = await client.callTool({
+        name: "tokenopt_compile_evidence",
+        arguments: {
+          task: "Daily task: create a focused test plan for search pre-filtering/can-match behavior. Cover pre_filter_shard_size request param. Return compact JSON.",
+          task_type: "api_flow",
+          cwd: repo,
+          include_structured_packet: true
+        }
+      });
+      assert.equal(packet.isError ?? false, false);
+      assert.match(packet.content[0].text, /answerable: true/);
+      assert.match(packet.content[0].text, /exact_matches=.*pre_filter_shard_size/);
+      assert.match(packet.content[0].text, /implementation_files=.*RestSearchAction\.java/);
+      assert.match(packet.content[0].text, /test_files=.*TransportSearchActionTests\.java/);
+      assert.equal(packet.structuredContent.packetSummary.answerable, true);
+      assert.equal(packet.structuredContent.packetSummary.max_additional_calls, 0);
+      assert.equal(packet.structuredContent.packetSummary.allowed_followups.length, 0);
+    },
+    { cwd: repo }
+  );
+});
+
 test("mcp compiles existing flow packet for diagramming and routes fallback to TokenOpt followups", async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-flow-repo-"));
   fs.mkdirSync(path.join(repo, "src", "checkout"), { recursive: true });

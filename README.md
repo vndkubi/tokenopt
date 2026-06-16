@@ -140,7 +140,7 @@ node <tokenopt-repo>\dist\cli.js doctor copilot
 
 This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, `.github/prompts/*.prompt.md`, and merges a lite `tokenopt` stdio MCP server into `<home>/.copilot/mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions + native prompt files today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
 
-After setup, use Copilot/Codex normally. In Copilot UI, call native slash prompts such as `/trace-bug <failing test or stack frame>`, `/write-unittest OrderService payment authorization`, or `/security-audit <diff or PR scope>`. In Codex, type natural tasks; `AGENTS.md` carries the routing rules.
+After setup, use Copilot/Codex normally. In Copilot UI, call native slash prompts such as `/investigate-flow <area>`, `/e2e-trace-flow <endpoint>`, `/bug-trace <failing test or stack frame>`, `/write-unittest-class OrderService payment authorization`, `/investigate-pbi <PBI>`, `/review-code <diff>`, or `/security-audit <diff or PR scope>`. In Codex, type natural tasks; `AGENTS.md` carries the routing rules.
 
 ## Benchmark
 

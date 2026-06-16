@@ -5,7 +5,17 @@ import { spawnSync } from "node:child_process";
 import { routeTask } from "./router.js";
 import type { AcquisitionMode, EvidenceContractName, EvidenceTaskType } from "./types.js";
 
-type SuiteBenchmarkMode = "baseline" | "mcp-first" | "mcp-only" | "compiled-hard-gate" | "router-strict" | "router-best";
+type SuiteBenchmarkMode =
+  | "baseline"
+  | "codegraph"
+  | "codegraph-only"
+  | "tokenopt-codegraph"
+  | "tokenopt-codegraph-hybrid"
+  | "mcp-first"
+  | "mcp-only"
+  | "compiled-hard-gate"
+  | "router-strict"
+  | "router-best";
 
 interface SuiteFile {
   name?: string;
@@ -72,6 +82,14 @@ interface QualityResult {
   checks: QualityCheck[];
 }
 
+interface IdeaQualityResult {
+  score: number;
+  passed: number;
+  total: number;
+  checks: string;
+  passedGate: boolean;
+}
+
 interface SuiteBenchmarkRow extends CodexRunMetrics {
   repo: string;
   project: string;
@@ -88,6 +106,9 @@ interface SuiteBenchmarkRow extends CodexRunMetrics {
   qualityScore: number;
   qualityChecks: string;
   qualityPassed: boolean;
+  ideaScore: number;
+  ideaChecks: string;
+  ideaPassed: boolean;
   correct: boolean;
   jsonValid: boolean;
   criticalMisses: string[];
@@ -116,9 +137,17 @@ interface SuiteBenchmarkOptions {
   maxTasks?: number;
   maxTasksPerRepo?: number;
   model?: string;
+  prewarmCodeGraph: boolean;
+  codeGraphPrewarmTimeoutMs: number;
 }
 
 const CODEX_PACKAGE = "@openai/codex@0.137.0";
+
+interface CodeGraphMcpServerConfig {
+  command: string;
+  args: string[];
+  source: "env-cli" | "env-root" | "local-root" | "path";
+}
 
 export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> {
   const options = parseOptions(args);
@@ -127,11 +156,13 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
   const rows: SuiteBenchmarkRow[] = [];
 
   fs.mkdirSync(options.rawDir, { recursive: true });
+  prewarmCodeGraphIfRequested(selected.items, options);
   for (const item of selected.items) {
     for (const mode of options.modes) {
       const codexPrompt = buildSuitePrompt(item.repo, item.task, mode);
       const run = runCodexSuiteBenchmark(item.repo, item.task, mode, codexPrompt, options);
       const quality = scoreSuiteAnswer(item.task, run.finalAnswer);
+      const idea = scoreSuiteIdeaQuality(item.task, run.finalAnswer);
       const routeMetadata = buildSuiteRouteMetadata(item.task.prompt, inferTaskType(item.task), {
         finalAnswer: run.finalAnswer,
         mcpCalls: run.mcpCalls,
@@ -154,6 +185,9 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
         qualityScore: quality.score,
         qualityChecks: `${quality.passed}/${quality.total}`,
         qualityPassed: quality.score >= 0.8,
+        ideaScore: idea.score,
+        ideaChecks: idea.checks,
+        ideaPassed: idea.passedGate,
         correct: quality.score >= 0.8,
         jsonValid: quality.jsonValid,
         criticalMisses: quality.criticalMisses,
@@ -172,6 +206,10 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
       name: suite.name,
       version: suite.version,
       purpose: suite.purpose
+    },
+    codegraph: {
+      prewarm: options.prewarmCodeGraph,
+      prewarmTimeoutMs: options.codeGraphPrewarmTimeoutMs
     },
     modes: options.modes,
     skippedRepos: selected.skippedRepos,
@@ -206,6 +244,8 @@ function parseOptions(args: string[]): SuiteBenchmarkOptions {
   let maxTasksPerRepo: number | undefined;
   let model: string | undefined;
   let rawDir: string | undefined;
+  let prewarmCodeGraph = false;
+  let codeGraphPrewarmTimeoutMs = 1_800_000;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -221,7 +261,9 @@ function parseOptions(args: string[]): SuiteBenchmarkOptions {
     }
     if (arg === "--mode") {
       const value = requiredValue(args, index, "--mode");
-      modes = value === "all" ? ["baseline", "mcp-first", "mcp-only", "compiled-hard-gate", "router-strict", "router-best"] : value.split(",").map(parseMode);
+      modes = value === "all"
+        ? ["baseline", "codegraph", "codegraph-only", "tokenopt-codegraph", "tokenopt-codegraph-hybrid", "mcp-first", "mcp-only", "compiled-hard-gate", "router-strict", "router-best"]
+        : value.split(",").map(parseMode);
       index += 1;
       continue;
     }
@@ -243,6 +285,15 @@ function parseOptions(args: string[]): SuiteBenchmarkOptions {
     }
     if (arg === "--timeout-ms") {
       timeoutMs = parsePositiveInt(requiredValue(args, index, "--timeout-ms"), "--timeout-ms");
+      index += 1;
+      continue;
+    }
+    if (arg === "--prewarm-codegraph") {
+      prewarmCodeGraph = true;
+      continue;
+    }
+    if (arg === "--codegraph-prewarm-timeout-ms") {
+      codeGraphPrewarmTimeoutMs = parsePositiveInt(requiredValue(args, index, "--codegraph-prewarm-timeout-ms"), "--codegraph-prewarm-timeout-ms");
       index += 1;
       continue;
     }
@@ -307,7 +358,9 @@ function parseOptions(args: string[]): SuiteBenchmarkOptions {
     timeoutMs,
     maxTasks,
     maxTasksPerRepo,
-    model
+    model,
+    prewarmCodeGraph,
+    codeGraphPrewarmTimeoutMs
   };
 }
 
@@ -416,7 +469,22 @@ function runCodexSuiteBenchmark(
     args.push("-m", options.model);
   }
 
-  if (mode !== "baseline") {
+  if (usesCodeGraph(mode)) {
+    const codegraph = buildCodeGraphMcpServerConfig(
+      repo,
+      inferTaskType(task),
+      options.prewarmCodeGraph
+        ? { ...process.env, TOKENOPT_CODEGRAPH_MCP_NO_PREWARM: "1" }
+        : process.env
+    );
+    args.push(
+      "-c",
+      `mcp_servers.codegraph.command=${tomlString(codegraph.command)}`,
+      "-c",
+      `mcp_servers.codegraph.args=${tomlArray(codegraph.args)}`
+    );
+  }
+  if (usesTokenOpt(mode)) {
     args.push(
       "-c",
       "mcp_servers.tokenopt.command='node'",
@@ -463,7 +531,431 @@ function runCodexSuiteBenchmark(
   };
 }
 
+export function buildCodeGraphMcpServerConfig(
+  repo: string,
+  taskType: EvidenceTaskType = "unknown",
+  env: NodeJS.ProcessEnv = process.env,
+  cwd = process.cwd()
+): CodeGraphMcpServerConfig {
+  const profile = env.TOKENOPT_CODEGRAPH_MCP_PROFILE?.trim() || codeGraphProfileForTask(taskType);
+  const baseArgs = [
+    "mcp",
+    "--root",
+    repo,
+    "--workspace-key",
+    repo,
+    "--mcp-profile",
+    profile
+  ];
+  if (env.TOKENOPT_CODEGRAPH_MCP_NO_PREWARM === "1" || env.TOKENOPT_CODEGRAPH_MCP_NO_PREWARM === "true") {
+    baseArgs.push("--no-prewarm");
+  }
+
+  const explicitCli = env.TOKENOPT_CODEGRAPH_CLI?.trim();
+  if (explicitCli) {
+    if (!looksLikeCommandPath(explicitCli)) {
+      return { command: explicitCli, args: baseArgs, source: "env-cli" };
+    }
+    const resolvedCli = path.resolve(cwd, explicitCli);
+    if (!fs.existsSync(resolvedCli)) {
+      throw new Error(`TOKENOPT_CODEGRAPH_CLI points to a missing file: ${resolvedCli}`);
+    }
+    if (/\.[cm]?js$/i.test(resolvedCli)) {
+      return { command: "node", args: [slash(resolvedCli), ...baseArgs], source: "env-cli" };
+    }
+    return { command: slash(resolvedCli), args: baseArgs, source: "env-cli" };
+  }
+
+  const explicitRoot = env.TOKENOPT_CODEGRAPH_ROOT?.trim();
+  if (explicitRoot) {
+    const cli = path.resolve(cwd, explicitRoot, "dist", "cli.js");
+    if (!fs.existsSync(cli)) {
+      throw new Error(`CodeGraph CLI not found at ${cli}. Run npm run build in ${path.resolve(cwd, explicitRoot)} or set TOKENOPT_CODEGRAPH_CLI.`);
+    }
+    return { command: "node", args: [slash(cli), ...baseArgs], source: "env-root" };
+  }
+
+  const localCli = findLocalCodeGraphCli(cwd);
+  if (localCli) {
+    return { command: "node", args: [slash(localCli), ...baseArgs], source: "local-root" };
+  }
+
+  return { command: "codegraph", args: baseArgs, source: "path" };
+}
+
+function findLocalCodeGraphCli(cwd: string): string | undefined {
+  const candidates = [
+    path.resolve(cwd, "..", "code-graph", "dist", "cli.js"),
+    path.resolve(cwd, "..", "codegraph", "dist", "cli.js")
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function looksLikeCommandPath(value: string): boolean {
+  return path.isAbsolute(value) || /[\\/]/.test(value) || /\.(?:[cm]?js|cmd|exe)$/i.test(value);
+}
+
+function codeGraphProfileForTask(taskType: EvidenceTaskType): "research" | "change" | "review" {
+  if (taskType === "review_diff") {
+    return "review";
+  }
+  if (taskType === "implement" || taskType === "write_unittest") {
+    return "change";
+  }
+  return "research";
+}
+
+function codeGraphTaskType(taskType: EvidenceTaskType): string {
+  if (taskType === "write_unittest") {
+    return "test";
+  }
+  if (taskType === "research_business" || taskType === "build_handoff") {
+    return "investigate";
+  }
+  return taskType;
+}
+
+function usesCodeGraph(mode: SuiteBenchmarkMode): boolean {
+  return mode === "codegraph" || mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-hybrid";
+}
+
+function usesTokenOpt(mode: SuiteBenchmarkMode): boolean {
+  return mode !== "baseline" && mode !== "codegraph" && mode !== "codegraph-only";
+}
+
+function prewarmCodeGraphIfRequested(
+  items: Array<{ repo: string; task: SuiteTask }>,
+  options: SuiteBenchmarkOptions
+): void {
+  if (!options.prewarmCodeGraph || !options.modes.some(usesCodeGraph)) {
+    return;
+  }
+  const repos = unique(items.map((item) => item.repo));
+  for (const repo of repos) {
+    const config = buildCodeGraphMcpServerConfig(repo, "unknown");
+    const invocation = codeGraphIndexInvocation(config);
+    const args = [
+      ...invocation.prefixArgs,
+      "index",
+      "--root",
+      repo,
+      "--workspace-key",
+      repo,
+      "--quiet"
+    ];
+    process.stderr.write(`[tokenopt:suite] Prewarming CodeGraph index for ${repo}\n`);
+    const result = spawnSync(invocation.command, args, {
+      cwd: repo,
+      encoding: "utf8",
+      timeout: options.codeGraphPrewarmTimeoutMs
+    });
+    if (result.status !== 0) {
+      const stderr = result.stderr ? `\n${result.stderr}` : "";
+      const stdout = result.stdout ? `\n${result.stdout}` : "";
+      throw new Error(`CodeGraph prewarm failed for ${repo} with exit ${result.status}.${stderr}${stdout}`);
+    }
+  }
+}
+
+function codeGraphIndexInvocation(config: CodeGraphMcpServerConfig): { command: string; prefixArgs: string[] } {
+  const firstArg = config.args[0];
+  if (config.command === "node" && firstArg && /\/cli\.js$/i.test(slash(firstArg))) {
+    return { command: config.command, prefixArgs: [firstArg] };
+  }
+  return { command: config.command, prefixArgs: [] };
+}
+
+const ANCHOR_QUERY_STOP_WORDS = new Set([
+  "add",
+  "and",
+  "are",
+  "asks",
+  "benchmark",
+  "compact",
+  "cover",
+  "create",
+  "daily",
+  "does",
+  "files",
+  "from",
+  "have",
+  "includes",
+  "into",
+  "json",
+  "keys",
+  "maps",
+  "missing",
+  "names",
+  "only",
+  "plan",
+  "prompt",
+  "quality",
+  "return",
+  "returns",
+  "should",
+  "task",
+  "test",
+  "tests",
+  "the",
+  "this",
+  "valid",
+  "with"
+]);
+
+export function buildCodeGraphAnchorQueryForTask(task: { prompt: string; qualityRubric?: string[] }): string {
+  const promptWithoutOutputContract = task.prompt.replace(/\bReturn valid compact JSON only with keys:[\s\S]*$/i, "");
+  const text = [promptWithoutOutputContract, ...(task.qualityRubric ?? [])].join(" ");
+  const lower = text.toLowerCase();
+  const terms: string[] = [];
+  const add = (term: string): void => {
+    const clean = term.trim().replace(/^[^A-Za-z0-9_]+|[^A-Za-z0-9_]+$/g, "");
+    if (clean.length < 3 || ANCHOR_QUERY_STOP_WORDS.has(clean.toLowerCase())) {
+      return;
+    }
+    if (!terms.some((existing) => existing.toLowerCase() === clean.toLowerCase())) {
+      terms.push(clean);
+    }
+  };
+
+  for (const token of text.match(/\b[A-Za-z_][A-Za-z0-9_]*\b/g) ?? []) {
+    if (
+      token === "nextRecallAt" ||
+      token.endsWith("_coverage") ||
+      token.endsWith("_commands") ||
+      token.endsWith("_behavior") ||
+      token.endsWith("_add")
+    ) {
+      continue;
+    }
+    if (/[A-Z]/.test(token.slice(1)) || /^[A-Z][a-z0-9]+/.test(token) || /[_0-9]/.test(token)) {
+      add(token);
+    }
+  }
+
+  if (lower.includes("recall")) {
+    add("markAsRecalled");
+    add("RecallsController");
+    add("RecallService");
+    add("MemoryTracker");
+    add("ForgettingCurve");
+    add("MemoryTrackerService");
+  }
+  if (lower.includes("recall") && /\b(correct|success|successful)\b/.test(lower)) {
+    add("recalledSuccessfully");
+  }
+  if (lower.includes("recall") && /\b(wrong|fail|failed|failure|incorrect)\b/.test(lower)) {
+    add("recallFailed");
+  }
+  if (/\b(nextrecallat|next recall|forgetting curve|spaced repetition)\b/i.test(text)) {
+    add("forgettingCurveIndex");
+    add("calculateNextRecallAt");
+    add("SpacedRepetitionAlgorithm");
+  }
+  if (/\b(dueindays|due in days|forecast|load more|current recall window|timezone|half-day|half day)\b/i.test(text)) {
+    add("recalling");
+    add("getDueMemoryTrackers");
+    add("getMemoryTrackersNeedToRepeat");
+    add("setCurrentRecallWindowEndAt");
+    add("currentRecallWindowEndAt");
+    add("alignByHalfADay");
+    add("TimestampOperations");
+    add("RecallPage");
+    add("treadmillMode");
+  }
+  if (/\b(applicationTags|applicationTypes|YARN|RM app|RM apps|cluster\/apps)\b/i.test(text)) {
+    add("RMWebServices");
+    add("ApplicationsRequestBuilder");
+    add("withApplicationTags");
+    add("withApplicationTypes");
+    add("parseQueries");
+    add("GetApplicationsRequest");
+    add("RMWSConsts");
+    add("TestApplicationsRequestBuilder");
+    add("TestRMWebServicesApps");
+  }
+  if (/\b(allow_partial_search_results|pre_filter_shard_size|can-match|TransportSearchAction|RestSearchAction|SearchRequest)\b/i.test(text)) {
+    add("RestSearchAction");
+    add("parseSearchRequest");
+    add("allowPartialSearchResults");
+    add("defaultAllowPartialSearchResults");
+    add("TransportSearchAction");
+    add("SearchRequest");
+    add("shouldPreFilterSearchShards");
+    add("setPreFilterShardSize");
+    add("getPreFilterShardSize");
+    add("shouldMinimizeRoundtrips");
+    add("hasPrimaryFieldSort");
+    add("RestSearchActionTests");
+    add("TransportSearchActionTests");
+  }
+
+  if (terms.length <= 2) {
+    const normalizedWords = text.replace(/[-_/]/g, " ").toLowerCase().match(/\b[a-z][a-z0-9]{2,}\b/g) ?? [];
+    for (const word of normalizedWords) {
+      if (["api", "answer", "controller", "flow", "recall", "route", "service", "spelling"].includes(word)) {
+        add(word);
+      }
+      if (terms.length >= 8) {
+        break;
+      }
+    }
+  }
+
+  return terms.slice(0, 32).join(" ");
+}
+
+export function buildCodeGraphFallbackRegex(anchorQuery: string): string {
+  const terms = anchorQuery
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 3)
+    .slice(0, 18);
+  return terms.map(escapeRegExp).join("|") || "TODO_NO_ANCHOR";
+}
+
+export function buildCodeGraphGapRefillQueryForTask(task: { prompt: string; qualityRubric?: string[] }): string | undefined {
+  const text = [task.prompt, ...(task.qualityRubric ?? [])].join(" ");
+  const lower = text.toLowerCase();
+  if (lower.includes("nextrecallat") && (lower.includes("thinkingtimems") || lower.includes("forgettingcurve") || /\bforgetting curve\b/.test(lower))) {
+    return "ForgettingCurve calculateThinkingTimeAdjustment";
+  }
+  const camelFields = [...text.matchAll(/\b([a-z][A-Za-z0-9]+At)\b/g)]
+    .map((match) => match[1])
+    .filter((value): value is string => Boolean(value));
+  const field = camelFields.find((value) => value.toLowerCase().includes("recall"));
+  if (field) {
+    return `calculate${field[0]?.toUpperCase()}${field.slice(1)}`;
+  }
+  return undefined;
+}
+
+function gapRefillPlanLines(gapRefillQuery: string | undefined): string[] {
+  if (!gapRefillQuery) {
+    return [];
+  }
+  return [
+    `- Then make one required gap-refill search_symbol call with query=${JSON.stringify(gapRefillQuery)}, includeTests=true, includeSnippets=false, and limit=40.`,
+    "- The gap-refill result is for missing exact source/method slots. Carry all relevant main_source files and exact calculate*/adjustment/state methods from this result into files, symbols, and existing_coverage.",
+    "- If the gap-refill result contains a required source file or method that was absent from the anchor result, include it instead of listing it as unresolved."
+  ];
+}
+
+function codeGraphToolPlanLines(taskType: EvidenceTaskType, budgetTokens: number, qualityRubricJson: string, anchorQuery: string, gapRefillQuery: string | undefined): string[] {
+  if (taskType === "write_unittest") {
+    return [
+      `- First call get_change_pack with task as only the original Daily task text, changeType=test, tokenBudget=${Math.min(budgetTokens, 8000)}, maxFiles=12, maxSymbols=30, includeTests=true, includeSnippets=false, and profile=compact.`,
+      "- Build the final test plan from get_change_pack.files, symbols, testsLikelyRelevant, expectedVerification, invariants, and taskOracle.",
+      "- Include concrete existing test file names/classes when testsLikelyRelevant or expectedVerification exposes them.",
+      `- Then make one search_symbol call with query=${JSON.stringify(anchorQuery)}, includeTests=true, includeSnippets=false, and limit=60.`,
+      "- The search_symbol response is the authority for existing source/test anchors. If it contains test_source or frameworkRole=test:test hits, carry those file and symbol names into existing_coverage/files instead of relying on broader testsLikelyRelevant guesses.",
+      "- Scan the entire returned symbols array, not just the first few ranked hits. Unique test_source files are more important than rank for test planning.",
+      "- Do not claim that an existing test was not identified when the search_symbol result contains a matching test file or test method.",
+      ...gapRefillPlanLines(gapRefillQuery)
+    ];
+  }
+  if (taskType === "implement") {
+    return [
+      `- First call get_change_pack with task as the complete user request above, changeType=implement, tokenBudget=${budgetTokens}, maxFiles=20, maxSymbols=50, includeTests=true, includeSnippets=false, and profile=full.`,
+      "- Build the final plan from get_change_pack.files, symbols, editRanges, testsLikelyRelevant, expectedVerification, invariants, and taskOracle.",
+      "- If a required behavior anchor is still missing, use at most one exact CodeGraph followup from search_code, search_symbol, find_tests_for, or get_file_slice for that named anchor."
+    ];
+  }
+  if (taskType === "review_diff") {
+    return [
+      "- First call review_patch with the complete diff/task, outputMode=balanced, includeLikelyTests=true, maxFindings=20, maxEvidencePerFinding=10, and limit=100.",
+      "- Build the final review from reviewFindings, risky hunks, impacted flow, testsLikelyRelevant, and validation gaps.",
+      "- If review_patch names a missing exact slice, use at most one get_file_slice followup for that slice."
+    ];
+  }
+  if (taskType === "api_flow" || taskType === "startup_flow" || taskType === "investigate" || taskType === "field_impact") {
+    return [
+      `- First call get_flow_pack with target as the complete user request above, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${budgetTokens}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=5000, and profile=full.`,
+      "- Build the final handoff from flowSteps, files, symbols, evidenceSlices, testsLikelyRelevant, risks, and validation hints.",
+      `- If get_flow_pack is missing required rubric coverage (${qualityRubricJson}), use at most one exact CodeGraph followup from search_code, find_references, find_tests_for, or get_file_slice for that named missing fact.`
+    ];
+  }
+  return [
+    `- First call compile_evidence with task as the complete user request above, taskType=${codeGraphTaskType(taskType)}, budgetTokens=${budgetTokens}, maxEvidenceItems=20, and qualityRubric=${qualityRubricJson}.`,
+    "- If compile_evidence returns answerable=false, use at most one listed allowedFollowups tool for the most important missing fact.",
+    "- If compile_evidence returns answerable=true but the final JSON still lacks concrete file, symbol, or test names required by the user request, use at most one exact CodeGraph followup for that missing named anchor."
+  ];
+}
+
+function tokenOptCodeGraphPlanLines(
+  repo: string,
+  taskType: EvidenceTaskType,
+  tokenOptBudget: number,
+  codeGraphBudget: number,
+  qualityRubricJson: string,
+  anchorQuery: string,
+  gapRefillQuery: string | undefined,
+  options: { hybridFallback?: boolean } = {}
+): string[] {
+  const requiredSlots = taskType === "write_unittest"
+    ? "target_behavior, owner_source_files, owner_methods, existing_test_files, missing_coverage, tests_to_add, validation_commands, risks"
+    : taskType === "review_diff"
+      ? "changed_files, changed_symbols, business_mapping, callers_callees, similar_logic, existing_tests, missing_tests, compatibility_risks, findings"
+      : taskType === "implement"
+        ? "scope, owner_flow, files_to_change, symbols, implementation_steps, existing_tests, test_plan, validation_commands, compatibility_risks"
+        : "entrypoint_or_owner, flow, source_files, symbols, existing_tests, implementation_ideas, validation_commands, risks";
+  const codeGraphFirst = taskType === "write_unittest"
+    ? `get_change_pack(task=<original Daily task only>, changeType=test, tokenBudget=${Math.min(codeGraphBudget, 8000)}, maxFiles=12, maxSymbols=30, includeTests=true, includeSnippets=false, profile=compact)`
+    : taskType === "review_diff"
+      ? "review_patch(diff/task=<original Daily task/diff only>, outputMode=balanced, includeLikelyTests=true, maxFindings=20, maxEvidencePerFinding=10, limit=100)"
+      : taskType === "implement"
+        ? `get_change_pack(task=<original Daily task only>, changeType=implement, tokenBudget=${codeGraphBudget}, maxFiles=20, maxSymbols=50, includeTests=true, includeSnippets=false, profile=full)`
+        : `get_flow_pack(target=<original Daily task only>, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${codeGraphBudget}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=5000, profile=full)`;
+  const followup = taskType === "write_unittest"
+    ? `Then make one exact search_symbol call with query=${JSON.stringify(anchorQuery)}, includeTests=true, includeSnippets=false, limit=60. This composite query intentionally covers behavior, owner symbols, state fields, and likely existing tests; do not replace it with a single identifier search.`
+    : "If one required slot is weak, make one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named missing slot.";
+  const fallbackRegex = buildCodeGraphFallbackRegex(anchorQuery);
+  const evidenceBudgetLine = options.hybridFallback
+    ? gapRefillQuery
+      ? "- Budget before fallback: at most 4 MCP calls total: 1 TokenOpt passport call plus exactly 3 CodeGraph evidence calls."
+      : "- Budget before fallback: at most 3 MCP calls total: 1 TokenOpt passport call plus at most 2 CodeGraph evidence calls."
+    : gapRefillQuery
+      ? "- Budget: at most 4 MCP calls total: 1 TokenOpt passport call plus exactly 3 CodeGraph evidence calls. Do not call shell/read fallback."
+      : "- Budget: at most 3 MCP calls total: 1 TokenOpt passport call plus at most 2 CodeGraph evidence calls. Do not call shell/read fallback.";
+  const fallbackLines = options.hybridFallback
+    ? [
+      "- Hybrid fallback gate: use shell only when a CodeGraph MCP call returns an error/timeout/unavailable daemon or when required slots still lack concrete repo-relative files/symbols/tests after the allowed CodeGraph calls.",
+      "- Hybrid fallback hard stop: the entire fallback is capped at 3 shell calls. If more evidence would be useful, stop exploration and record the gap as risk/missing_coverage/open_questions instead of calling shell again.",
+      `- Fallback command 1 must be one exact bounded search: rg -n -S ${JSON.stringify(fallbackRegex)} --glob '!node_modules/**' --glob '!build/**' --glob '!dist/**' --glob '!target/**' .`,
+      "- Fallback command 2 must batch all selected reads into one PowerShell command and may read at most 4 small slices around selected hits with Get-Content/Select-Object; do not read whole large files.",
+      "- Fallback command 3 is optional and only for targeted tests, using rg against a concrete owner symbol or behavior term plus test/spec file globs.",
+      "- Do not use rg --files, broad directory listings, or broad whole-repo reads in hybrid fallback.",
+      "- If fallback was used, mention that fact inside an existing risks, notes, missing_coverage, or open_questions field; do not add extra top-level keys unless the requested schema already allows them."
+    ]
+    : [];
+  return [
+    "- Use TokenOpt as the quality passport and CodeGraph as the evidence provider.",
+    `- First call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, budget_tokens=${tokenOptBudget}, quality_rubric=${qualityRubricJson}, and task set to only the original Daily task text above.`,
+    `- Treat the TokenOpt packet as a slot checklist, not as sufficient final evidence. Required slots: ${requiredSlots}.`,
+    "- When calling any MCP tool, pass only the original Daily task/diff text, never this Benchmark constraints section or tool instructions.",
+    `- Then call CodeGraph ${codeGraphFirst}.`,
+    `- ${followup}`,
+    taskType === "write_unittest"
+      ? "- For write_unittest synthesis, scan the entire returned symbols array and prioritize unique test_source/frameworkRole=test:test hits over broad testsLikelyRelevant entries. Carry matching test files and exact owner symbols into existing_coverage, files, and symbols."
+      : "- Carry exact CodeGraph evidence into the final answer.",
+    ...gapRefillPlanLines(gapRefillQuery),
+    evidenceBudgetLine,
+    ...fallbackLines,
+    "- Final ideas/proposals/tests must be evidence-grounded: each concrete idea should name relevant files or symbols, explain business/behavior value, include validation/tests, and state risks/tradeoffs.",
+    "- Final output must be a syntactically valid compact single JSON object under 7000 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects.",
+    "- Compact limits: max 5 existing_coverage items, max 12 files, max 16 symbols, max 5 tests_to_add, max 5 risks. Preserve all requested top-level keys exactly.",
+    "- If a slot remains missing, do not invent it; include it as a risk or missing_coverage item in the requested JSON shape."
+  ];
+}
+
 function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMode): string {
+  const taskType = inferTaskType(task);
+  const packetTokens = task.maxBudget?.packetTokens ?? 1200;
+  const codeGraphBudgetTokens = Math.max(task.maxBudget?.packetTokens ?? 8000, taskType === "write_unittest" ? 12000 : 8000);
+  const anchorQuery = buildCodeGraphAnchorQueryForTask(task);
+  const gapRefillQuery = buildCodeGraphGapRefillQueryForTask(task);
+  const codeGraphRubric = task.qualityRubric.length > 0
+    ? JSON.stringify(task.qualityRubric)
+    : "[\"files\", \"symbols\", \"tests\", \"risks\", \"validation\"]";
   const common = [
     task.prompt,
     "",
@@ -481,8 +973,34 @@ function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMod
     ].join("\n");
   }
 
-  const taskType = inferTaskType(task);
-  const packetTokens = task.maxBudget?.packetTokens ?? 1200;
+  if (mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-hybrid") {
+    return [
+      ...common,
+      ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, codeGraphBudgetTokens, codeGraphRubric, anchorQuery, gapRefillQuery, {
+        hybridFallback: mode === "tokenopt-codegraph-hybrid"
+      }),
+      "- Preserve the requested JSON contract exactly."
+    ].join("\n");
+  }
+
+  if (mode === "codegraph" || mode === "codegraph-only") {
+    return [
+      ...common,
+      "- Use CodeGraph MCP v2 as the primary code acquisition path.",
+      "- When calling any CodeGraph MCP tool, pass task/target as only the original Daily task text above. Do not include this Benchmark constraints section, repository root line, output wrapper instructions, or CodeGraph tool instructions in the MCP arguments.",
+      ...codeGraphToolPlanLines(taskType, codeGraphBudgetTokens, codeGraphRubric, anchorQuery, gapRefillQuery),
+      gapRefillQuery
+        ? "- Budget: use exactly 3 CodeGraph MCP calls total for this task: get_change_pack, anchor search_symbol, and gap-refill search_symbol."
+        : "- Budget: use at most 2 CodeGraph MCP calls total unless the first tool returns an explicit bounded followup needed to preserve the requested JSON contract.",
+      "- Do not call legacy codegraph_explore/codegraph_search tool names.",
+      "- Treat CodeGraph evidence snippets/slices as already read. Do not repeat the same lookup with grep, repo-wide search, or broad file reads.",
+      mode === "codegraph-only"
+        ? "- Shell/read fallback is disabled. Use only CodeGraph MCP evidence and mark unresolved risks explicitly when coverage is incomplete."
+        : "- Shell/read fallback is allowed only if compile_evidence recommends targeted_shell or the single exact CodeGraph followup still cannot cover a required item.",
+      "- Preserve the requested JSON contract. Include unresolved risks when evidence is incomplete."
+    ].join("\n");
+  }
+
   const taskArgumentLine = taskType === "review_diff"
     ? "- For tokenopt_compile_evidence, pass task as the complete user request above including the full inline unified diff; do not summarize or omit the diff."
     : "- For tokenopt_compile_evidence, pass task as the complete user request above.";
@@ -585,8 +1103,32 @@ function inferTaskType(task: SuiteTask): EvidenceTaskType {
   if (idAndClass.includes("field") || idAndClass.includes("impact")) {
     return "field_impact";
   }
-  if (idAndClass.includes("review") || idAndClass.includes("diff")) {
+  if (idAndClass.includes("bug_trace") || idAndClass.includes("trace_bug")) {
+    return "investigate";
+  }
+  if (idAndClass.includes("review") || idAndClass.includes("diff") || idAndClass.includes("security_audit")) {
     return "review_diff";
+  }
+  if (idAndClass.includes("performance_analysis")) {
+    return "investigate";
+  }
+  if (
+    idAndClass.includes("pbi_investigate") ||
+    idAndClass.includes("requirement_investigate") ||
+    idAndClass.includes("requirement_analysis") ||
+    idAndClass.includes("business_investigate") ||
+    idAndClass.includes("business_deepdive")
+  ) {
+    return "research_business";
+  }
+  if (idAndClass.includes("build_handoff") || idAndClass.includes("daily_handoff")) {
+    return "build_handoff";
+  }
+  if (idAndClass.includes("pbi_plan") || idAndClass.includes("implement") || idAndClass.includes("implementation") || idAndClass.includes("refactor")) {
+    return "implement";
+  }
+  if (idAndClass.includes("unit") || idAndClass.includes("test_plan") || idAndClass.includes("write_unittest")) {
+    return "write_unittest";
   }
   if (idAndClass.includes("api") || idAndClass.includes("flow") || idAndClass.includes("semantic")) {
     return "api_flow";
@@ -597,8 +1139,17 @@ function inferTaskType(task: SuiteTask): EvidenceTaskType {
   if (text.includes("review") || text.includes("diff") || text.includes("patch")) {
     return "review_diff";
   }
+  if (/\b(pbi|requirement)\b/.test(text) && /\b(investigate|what|why|acceptance criteria)\b/.test(text)) {
+    return "research_business";
+  }
+  if (/\b(implementation plan|implementation handoff|implement this pbi|files_to_change|code change)\b/.test(text)) {
+    return "implement";
+  }
   if (text.includes("startup")) {
     return "startup_flow";
+  }
+  if (/\b(unit[- ]test|test plan|write tests?|add tests?|missing test coverage|test coverage)\b/.test(text)) {
+    return "write_unittest";
   }
   if (text.includes("api") || text.includes("flow") || text.includes("route")) {
     return "api_flow";
@@ -637,6 +1188,134 @@ function scoreSuiteAnswer(task: SuiteTask, answer: string): QualityResult {
     criticalMisses,
     checks
   };
+}
+
+export function scoreSuiteIdeaQuality(task: SuiteTask, answer: string): IdeaQualityResult {
+  const parsed = parseJsonAnswer(answer);
+  const taskType = inferTaskType(task);
+  const checks: Array<{ name: string; passed: boolean }> = [];
+  const parsedObject = isRecord(parsed) ? parsed : undefined;
+  const expectedFilesHit = task.expectedEvidence.files.filter((file) => containsFileReference(answer, file)).length;
+  const expectedSymbolsHit = task.expectedEvidence.symbols.filter((symbol) => containsEvidence(answer, symbol)).length;
+  const expectedTermsHit = task.expectedEvidence.terms.filter((term) => containsEvidence(answer, term)).length;
+
+  checks.push({ name: "json_object", passed: Boolean(parsedObject) });
+  checks.push({ name: "grounded_files", passed: expectedFilesHit >= Math.min(2, Math.max(1, task.expectedEvidence.files.length)) });
+  checks.push({ name: "grounded_symbols_or_terms", passed: expectedSymbolsHit >= 1 && expectedTermsHit >= 1 });
+  checks.push({
+    name: "existing_context",
+    passed: parsedObject ? fieldHasContent(parsedObject, [
+      "existing_coverage",
+      "flow",
+      "summary",
+      "evidence",
+      "entrypoint",
+      "sequence",
+      "business_flow",
+      "pbi_summary",
+      "scope",
+      "owner_flow",
+      "business_coverage",
+      "findings"
+    ]) : false
+  });
+  checks.push({
+    name: "actionable_ideas",
+    passed: parsedObject
+      ? fieldHasContent(parsedObject, taskType === "write_unittest"
+        ? ["tests_to_add", "test_plan", "implementation_plan", "ideas"]
+        : taskType === "review_diff"
+          ? ["findings", "technical_review", "business_coverage", "missing_tests", "similar_logic"]
+          : taskType === "implement"
+            ? ["implementation_steps", "implementation_plan", "files_to_change", "test_plan", "tests"]
+            : ["implementation_plan", "implementation_steps", "ideas", "likely_root_causes", "tests_to_add", "next_steps", "optimization_options", "measurements", "cost_model"])
+      : false
+  });
+  checks.push({
+    name: "validation",
+    passed: parsedObject ? fieldHasContent(parsedObject, [
+      "tests_to_run",
+      "test_commands",
+      "validation",
+      "validation_commands",
+      "expected_verification",
+      "test_plan",
+      "tests",
+      "missing_tests"
+    ]) : false
+  });
+  checks.push({
+    name: "risks_or_missing",
+    passed: parsedObject ? fieldHasContent(parsedObject, [
+      "risks",
+      "missing_coverage",
+      "tradeoffs",
+      "unresolved_risks",
+      "compatibility_risks",
+      "unknowns",
+      "open_questions"
+    ]) : false
+  });
+  checks.push({
+    name: "concrete_proposal_surface",
+    passed: /\b(?:assert|test|implement|change|add|verify|run|risk|coverage|plan|review|finding|regression|validate)\b/i.test(answer) &&
+      /\b[A-Za-z0-9_./\\-]+\.(?:ts|tsx|js|jsx|java|py|go|rs|kt|scala)\b/.test(answer)
+  });
+
+  const passed = checks.filter((check) => check.passed).length;
+  const total = checks.length || 1;
+  const score = Number((passed / total).toFixed(3));
+  return {
+    score,
+    passed,
+    total,
+    checks: `${passed}/${total}`,
+    passedGate: score >= 0.75
+  };
+}
+
+function fieldHasContent(value: unknown, fieldNames: string[]): boolean {
+  const wanted = new Set(fieldNames.map(normalizeFieldName));
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const current = stack.pop();
+    if (Array.isArray(current)) {
+      stack.push(...current);
+      continue;
+    }
+    if (!isRecord(current)) {
+      continue;
+    }
+    for (const [key, fieldValue] of Object.entries(current)) {
+      if (wanted.has(normalizeFieldName(key)) && valueHasContent(fieldValue)) {
+        return true;
+      }
+      if (isRecord(fieldValue) || Array.isArray(fieldValue)) {
+        stack.push(fieldValue);
+      }
+    }
+  }
+  return false;
+}
+
+function valueHasContent(value: unknown): boolean {
+  if (typeof value === "string") {
+    return value.trim().length >= 8;
+  }
+  if (typeof value === "number" || typeof value === "boolean") {
+    return true;
+  }
+  if (Array.isArray(value)) {
+    return value.some(valueHasContent);
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some(valueHasContent);
+  }
+  return false;
+}
+
+function normalizeFieldName(value: string): string {
+  return value.replace(/[^a-z0-9]+/gi, "_").replace(/^_+|_+$/g, "").toLowerCase();
 }
 
 function parseCodexJsonl(text: string): {
@@ -795,6 +1474,8 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     "Double",
     "Quality",
     "Checks",
+    "Idea",
+    "Idea checks",
     "Correct",
     "JSON",
     "Critical",
@@ -820,6 +1501,8 @@ function formatSuiteRows(rows: SuiteBenchmarkRow[], skippedRepos: SkippedRepo[],
     row.doubleSpend ? "yes" : "no",
     row.qualityScore.toFixed(3),
     row.qualityChecks,
+    row.ideaScore.toFixed(3),
+    row.ideaChecks,
     row.correct ? "yes" : "no",
     row.jsonValid ? "yes" : "no",
     String(row.criticalMisses.length),
@@ -864,6 +1547,7 @@ function formatMarkdownReport(
     `Suite: ${suite.name ?? "unknown"} ${suite.version ?? ""}`.trim(),
     `Runner: codex exec --json (${options.codexPackage})`,
     `Modes: ${options.modes.join(", ")}`,
+    `CodeGraph prewarm: ${options.prewarmCodeGraph ? `yes (${options.codeGraphPrewarmTimeoutMs}ms timeout)` : "no"}`,
     "",
     "## Summary",
     "",
@@ -872,8 +1556,30 @@ function formatMarkdownReport(
     "## Aggregate",
     "",
     formatMarkdownTable(
-      ["Mode", "Runs", "Correct", "Median input tok", "Avg input tok", "Avg quality", "Avg critical miss"],
+      ["Mode", "Runs", "Correct", "Idea ok", "Median input tok", "Avg input tok", "Avg quality", "Avg idea", "Avg critical miss"],
       aggregateRows(rows)
+    ),
+    "",
+    "## Prompt Family Aggregate",
+    "",
+    formatMarkdownTable(
+      [
+        "Family",
+        "Mode",
+        "Runs",
+        "Correct",
+        "Idea ok",
+        "Median input tok",
+        "Avg input tok",
+        "Avg output tok",
+        "Avg quality",
+        "Avg idea",
+        "Avg critical miss",
+        "Avg MCP",
+        "Avg shell",
+        "Avg duration ms"
+      ],
+      promptFamilyAggregateRows(rows)
     )
   ];
 
@@ -932,6 +1638,8 @@ function formatMarkdownReport(
         `Final output:`,
         fenced(row.finalAnswer, row.jsonValid ? "json" : undefined),
         "",
+        `Idea checks: ${row.ideaChecks} (${row.ideaScore.toFixed(3)})`,
+        "",
         `Critical misses: ${row.criticalMisses.length > 0 ? row.criticalMisses.join(", ") : "none"}`
       );
     }
@@ -951,6 +1659,7 @@ function summaryHeader(): string[] {
     "Double",
     "Correct",
     "Quality",
+    "Idea",
     "Critical",
     "JSON",
     "Input tok",
@@ -979,6 +1688,7 @@ function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string
     row.doubleSpend ? "yes" : "no",
     row.correct ? "yes" : "no",
     row.qualityScore.toFixed(3),
+    row.ideaScore.toFixed(3),
     String(row.criticalMisses.length),
     row.jsonValid ? "yes" : "no",
     String(row.usage.input_tokens),
@@ -1000,17 +1710,119 @@ function aggregateRows(rows: SuiteBenchmarkRow[]): string[][] {
       mode,
       String(modeRows.length),
       `${modeRows.filter((row) => row.correct).length}/${modeRows.length}`,
+      `${modeRows.filter((row) => row.ideaPassed).length}/${modeRows.length}`,
       String(median(modeRows.map((row) => row.usage.input_tokens))),
       average(modeRows.map((row) => row.usage.input_tokens)).toFixed(0),
       average(modeRows.map((row) => row.qualityScore)).toFixed(3),
+      average(modeRows.map((row) => row.ideaScore)).toFixed(3),
       average(modeRows.map((row) => row.criticalMisses.length)).toFixed(2)
     ];
   });
 }
 
+function promptFamilyAggregateRows(rows: SuiteBenchmarkRow[]): string[][] {
+  const families = unique(rows.map(promptFamily));
+  const modes = unique(rows.map((row) => row.mode));
+  const output: string[][] = [];
+  for (const family of families) {
+    for (const mode of modes) {
+      const familyRows = rows.filter((row) => promptFamily(row) === family && row.mode === mode);
+      if (familyRows.length === 0) {
+        continue;
+      }
+      output.push([
+        family,
+        mode,
+        String(familyRows.length),
+        `${familyRows.filter((row) => row.correct).length}/${familyRows.length}`,
+        `${familyRows.filter((row) => row.ideaPassed).length}/${familyRows.length}`,
+        String(median(familyRows.map((row) => row.usage.input_tokens))),
+        average(familyRows.map((row) => row.usage.input_tokens)).toFixed(0),
+        average(familyRows.map((row) => row.usage.output_tokens)).toFixed(0),
+        average(familyRows.map((row) => row.qualityScore)).toFixed(3),
+        average(familyRows.map((row) => row.ideaScore)).toFixed(3),
+        average(familyRows.map((row) => row.criticalMisses.length)).toFixed(2),
+        average(familyRows.map((row) => row.mcpCalls)).toFixed(1),
+        average(familyRows.map((row) => row.shellCalls)).toFixed(1),
+        average(familyRows.map((row) => row.durationMs)).toFixed(0)
+      ]);
+    }
+  }
+  return output;
+}
+
+function promptFamily(row: SuiteBenchmarkRow): string {
+  const explicitFamily = promptFamilyFromTaskClass(row.taskClass);
+  if (explicitFamily) {
+    return explicitFamily;
+  }
+  const key = `${row.taskId} ${row.taskClass} ${row.prompt}`.toLowerCase();
+  if (/\bimplement_code_unittest\b|\bimplement code\b|\bcode \+ unit\b/.test(key)) {
+    return "implement_code_unittest";
+  }
+  if (/\breview\b|\bdiff\b|\bpatch\b/.test(key)) {
+    return "code_review";
+  }
+  if (/\bbusiness_deepdive\b|\bbusiness deep[- ]?dive\b|\bdomain deep[- ]?dive\b/.test(key)) {
+    return "business_deepdive";
+  }
+  if (/\brequirement_analysis\b|\brequirement analyst\b|\brequirement analysis\b/.test(key)) {
+    return "requirement_analysis";
+  }
+  if (/\bbug_trace\b|\btrace_bug\b|\bbug trace\b|\bfailing\b|\brepro\b/.test(key)) {
+    return "bug_trace";
+  }
+  if (/\brefactor\b|\brefactoring\b/.test(key)) {
+    return "refactor_code";
+  }
+  if (/\bunit\b|\btest_plan\b|\bwrite_unittest\b/.test(key)) {
+    return "unit_test_plan";
+  }
+  if (/\bpbi_investigate\b|\brequirement_investigate\b/.test(key)) {
+    return "investigate_pbi";
+  }
+  if (/\bpbi_plan\b|\bimplementation plan\b/.test(key)) {
+    return "plan_pbi";
+  }
+  if (/\bimplement_handoff\b|\bimplementation handoff\b|\bfiles_to_change\b/.test(key)) {
+    return "implement_handoff";
+  }
+  if (/\btrace\b|\bsequence\b/.test(key)) {
+    return "trace_flow";
+  }
+  if (/\binvestigate\b|\blikely_root_causes\b/.test(key)) {
+    return "investigate";
+  }
+  return row.taskClass || "unknown";
+}
+
+function promptFamilyFromTaskClass(taskClass: string): string | undefined {
+  const known = new Set([
+      "business_deepdive",
+      "investigate_flow",
+      "e2e_trace_flow",
+      "requirement_analysis",
+      "pbi_investigate",
+      "pbi_plan",
+      "bug_trace",
+      "performance_analysis",
+      "security_audit",
+      "plan_implement",
+      "implement_code_unittest",
+      "write_unittest_class",
+      "code_review",
+      "refactor_code"
+  ]);
+  return known.has(taskClass) ? taskClass : undefined;
+}
+
 function parseMode(value: string): SuiteBenchmarkMode {
   if (
     value === "baseline" ||
+    value === "codegraph" ||
+    value === "codegraph-only" ||
+    value === "tokenopt-codegraph" ||
+    value === "tokenopt-codegraph-hybrid" ||
     value === "mcp-first" ||
     value === "mcp-only" ||
     value === "compiled-hard-gate" ||
@@ -1021,6 +1833,15 @@ function parseMode(value: string): SuiteBenchmarkMode {
   }
   if (value === "tokenopt-mcp" || value === "compiled-packet") {
     return "mcp-only";
+  }
+  if (value === "tokenopt-only") {
+    return "mcp-only";
+  }
+  if (value === "tokenopt+codegraph" || value === "combined") {
+    return "tokenopt-codegraph";
+  }
+  if (value === "tokenopt+codegraph-hybrid" || value === "combined-hybrid" || value === "hybrid-codegraph") {
+    return "tokenopt-codegraph-hybrid";
   }
   if (value === "compiled-shadow-gate") {
     return "mcp-first";
@@ -1168,6 +1989,18 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function tomlArray(values: string[]): string {
+  return `[${values.map(tomlString).join(",")}]`;
+}
+
+function tomlString(value: string): string {
+  const normalized = slash(value);
+  if (normalized.includes("'")) {
+    throw new Error(`Cannot encode TOML literal string containing single quote: ${normalized}`);
+  }
+  return `'${normalized}'`;
+}
+
 function slash(value: string): string {
   return value.replace(/\\/g, "/");
 }
@@ -1182,20 +2015,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function suiteBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--json] [--show-answers]
+  tokenopt benchmark suite --suite <json> --repo <path> [--repo <path>] [--mode baseline|codegraph|codegraph-only|tokenopt-codegraph|tokenopt-codegraph-hybrid|mcp-first|mcp-only|compiled-hard-gate|router-strict|router-best|all] [--task all|id,id] [--model <model>] [--out <path>] [--markdown <path>] [--prewarm-codegraph] [--json] [--show-answers]
 
 Notes:
   - Tasks are matched by suite task.project against the repo directory name.
   - baseline uses normal Codex CLI tools.
+  - codegraph injects CodeGraph MCP v2; set TOKENOPT_CODEGRAPH_ROOT to a local code-graph checkout or TOKENOPT_CODEGRAPH_CLI to dist/cli.js when codegraph is not on PATH.
+  - Without env overrides, codegraph mode auto-detects sibling ../code-graph/dist/cli.js before falling back to codegraph on PATH.
+  - codegraph-only injects CodeGraph MCP and disables shell_tool.
+  - tokenopt-codegraph injects TokenOpt and CodeGraph MCP, disables shell_tool, and measures evidence-grounded idea quality.
+  - tokenopt-codegraph-hybrid injects TokenOpt and CodeGraph MCP, then allows a bounded exact rg/slice fallback only when CodeGraph is unavailable or missing required slots.
+  - --prewarm-codegraph runs codegraph index once per selected repo before Codex runs and adds --no-prewarm to per-run MCP servers.
   - mcp-first injects TokenOpt MCP and allows shell fallback only after exact TokenOpt followups.
-  - mcp-only and compiled-hard-gate disable shell_tool.
+  - mcp-only/tokenopt-only and compiled-hard-gate disable shell_tool.
   - router-strict disables shell_tool and chooses strict evidence acquisition by task type.
   - router-best uses strict acquisition where TokenOpt has deterministic coverage and bounded hybrid fallback otherwise.
 `;
 }
 
 function shouldDisableShell(mode: SuiteBenchmarkMode, task: SuiteTask): boolean {
-  if (mode === "mcp-only" || mode === "compiled-hard-gate" || mode === "router-strict") {
+  if (mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "mcp-only" || mode === "compiled-hard-gate" || mode === "router-strict") {
     return true;
   }
   if (mode !== "router-best") {

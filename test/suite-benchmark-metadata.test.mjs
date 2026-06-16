@@ -1,6 +1,16 @@
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { buildSuiteRouteMetadata } from "../dist/suite-benchmark.js";
+import {
+  buildCodeGraphAnchorQueryForTask,
+  buildCodeGraphFallbackRegex,
+  buildCodeGraphGapRefillQueryForTask,
+  buildCodeGraphMcpServerConfig,
+  buildSuiteRouteMetadata,
+  scoreSuiteIdeaQuality
+} from "../dist/suite-benchmark.js";
 
 test("suite benchmark metadata reports acquisition mode and contract", () => {
   const metadata = buildSuiteRouteMetadata(
@@ -32,4 +42,221 @@ test("suite benchmark metadata flags direct-narrow double spend", () => {
 
   assert.equal(metadata.acquisitionMode, "direct_narrow");
   assert.equal(metadata.doubleSpend, true);
+});
+
+test("codegraph mcp config uses local v2 cli root", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-codegraph-root-"));
+  try {
+    const cli = path.join(temp, "dist", "cli.js");
+    fs.mkdirSync(path.dirname(cli), { recursive: true });
+    fs.writeFileSync(cli, "", "utf8");
+
+    const config = buildCodeGraphMcpServerConfig(
+      "D:\\Personal\\Projects\\hadoop",
+      "api_flow",
+      { TOKENOPT_CODEGRAPH_ROOT: temp },
+      process.cwd()
+    );
+
+    assert.equal(config.command, "node");
+    assert.equal(config.source, "env-root");
+    assert.deepEqual(config.args.slice(1), [
+      "mcp",
+      "--root",
+      "D:\\Personal\\Projects\\hadoop",
+      "--workspace-key",
+      "D:\\Personal\\Projects\\hadoop",
+      "--mcp-profile",
+      "research"
+    ]);
+    assert.match(config.args[0], /dist\/cli\.js$/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("codegraph mcp config maps direct js cli to node command", () => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-codegraph-cli-"));
+  try {
+    const cli = path.join(temp, "dist", "cli.js");
+    fs.mkdirSync(path.dirname(cli), { recursive: true });
+    fs.writeFileSync(cli, "", "utf8");
+
+    const config = buildCodeGraphMcpServerConfig(
+      "D:\\Personal\\Projects\\doughnut",
+      "write_unittest",
+      { TOKENOPT_CODEGRAPH_CLI: cli },
+      process.cwd()
+    );
+
+    assert.equal(config.command, "node");
+    assert.equal(config.source, "env-cli");
+    assert.deepEqual(config.args.slice(1), [
+      "mcp",
+      "--root",
+      "D:\\Personal\\Projects\\doughnut",
+      "--workspace-key",
+      "D:\\Personal\\Projects\\doughnut",
+      "--mcp-profile",
+      "change"
+    ]);
+    assert.match(config.args[0], /dist\/cli\.js$/);
+  } finally {
+    fs.rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("codegraph anchor query expands recall scheduling test-plan terms", () => {
+  const query = buildCodeGraphAnchorQueryForTask({
+    prompt: "Daily task: create a test plan for recall-answer scheduling quality. Cover correct vs wrong answers, thinkingTimeMs adjustment, early reward/late penalty, nextRecallAt recomputation, and spelling vs non-spelling paths.",
+    qualityRubric: [
+      "Maps recall answer entrypoints to MemoryTracker and ForgettingCurve state changes.",
+      "Names existing tests for thinking time and early/late schedule adjustments."
+    ]
+  });
+
+  for (const term of [
+    "thinkingTimeMs",
+    "MemoryTracker",
+    "ForgettingCurve",
+    "markAsRecalled",
+    "recalledSuccessfully",
+    "recallFailed",
+    "forgettingCurveIndex"
+  ]) {
+    assert.match(query, new RegExp(`\\b${term}\\b`));
+  }
+  assert.doesNotMatch(query, /\bnextRecallAt\b/);
+  assert.doesNotMatch(query, /\btarget_behavior\b/);
+});
+
+test("codegraph anchor query expands recall forecast PBI terms without expected evidence", () => {
+  const query = buildCodeGraphAnchorQueryForTask({
+    prompt: "Daily task: create an implementation plan for the Recall forecast-count PBI. Need API forecast counts for due windows 0, 3, 7, and 14 days, same timezone/half-day rules as current recall loading, monotonic counts excluding deleted/removed trackers, compatible Load more buttons, and UI counts that do not break treadmill mode or current-session progress.",
+    qualityRubric: [
+      "Connects backend recall due logic, frontend Recall page, and existing Load more/treadmill behavior.",
+      "Includes monotonic forecast-count behavior and timezone/half-day validation."
+    ]
+  });
+
+  for (const term of [
+    "RecallsController",
+    "RecallService",
+    "getDueMemoryTrackers",
+    "alignByHalfADay",
+    "currentRecallWindowEndAt",
+    "RecallPage",
+    "treadmillMode"
+  ]) {
+    assert.match(query, new RegExp(`\\b${term}\\b`));
+  }
+});
+
+test("codegraph fallback regex is bounded and shell-safe", () => {
+  const regex = buildCodeGraphFallbackRegex("RecallsController RecallService currentRecallWindowEndAt /api/recalls");
+
+  assert.match(regex, /RecallsController\|RecallService/);
+  assert.match(regex, /currentRecallWindowEndAt/);
+  assert.match(regex, /\/api\/recalls/);
+});
+
+test("codegraph gap refill query targets derived scheduling methods", () => {
+  const query = buildCodeGraphGapRefillQueryForTask({
+    prompt: "Daily task: create a test plan for recall-answer scheduling quality. Cover thinkingTimeMs adjustment and nextRecallAt recomputation.",
+    qualityRubric: [
+      "Maps recall answer entrypoints to MemoryTracker and ForgettingCurve state changes."
+    ]
+  });
+
+  assert.equal(query, "ForgettingCurve calculateThinkingTimeAdjustment");
+});
+
+test("suite idea quality rewards grounded actionable proposals", () => {
+  const task = {
+    id: "sample-test-plan",
+    project: "sample",
+    class: "api_flow_unit_test_plan",
+    prompt: "Return valid compact JSON only with keys: existing_coverage, missing_coverage, files, symbols, tests_to_add, test_commands, risks.",
+    expectedEvidence: {
+      files: [
+        "src/main/java/app/MemoryTracker.java",
+        "src/test/java/app/MemoryTrackerTest.java"
+      ],
+      symbols: ["markAsRecalled"],
+      terms: ["nextRecallAt"]
+    },
+    qualityRubric: [],
+    gateAssertions: []
+  };
+  const result = scoreSuiteIdeaQuality(task, JSON.stringify({
+    existing_coverage: ["src/test/java/app/MemoryTrackerTest.java covers markAsRecalled"],
+    missing_coverage: ["nextRecallAt recomputation edge case"],
+    files: ["src/main/java/app/MemoryTracker.java", "src/test/java/app/MemoryTrackerTest.java"],
+    symbols: ["markAsRecalled"],
+    tests_to_add: [{ file: "src/test/java/app/MemoryTrackerTest.java", name: "recomputes nextRecallAt" }],
+    test_commands: ["./gradlew test --tests app.MemoryTrackerTest"],
+    risks: ["boundary timing risk"]
+  }));
+
+  assert.equal(result.passedGate, true);
+  assert.ok(result.score >= 0.75);
+});
+
+test("suite idea quality rejects generic ungrounded proposals", () => {
+  const task = {
+    id: "sample-test-plan",
+    project: "sample",
+    class: "api_flow_unit_test_plan",
+    prompt: "Return valid compact JSON only with keys: tests_to_add.",
+    expectedEvidence: {
+      files: ["src/main/java/app/MemoryTracker.java"],
+      symbols: ["markAsRecalled"],
+      terms: ["nextRecallAt"]
+    },
+    qualityRubric: [],
+    gateAssertions: []
+  };
+  const result = scoreSuiteIdeaQuality(task, JSON.stringify({
+    tests_to_add: ["add more tests"],
+    risks: ["unknown"]
+  }));
+
+  assert.equal(result.passedGate, false);
+  assert.ok(result.score < 0.75);
+});
+
+test("suite idea quality accepts grounded review findings", () => {
+  const task = {
+    id: "sample-review",
+    project: "sample",
+    class: "review_diff",
+    prompt: "Return valid compact JSON only with keys: findings, business_coverage, missing_tests, files, symbols, risks.",
+    expectedEvidence: {
+      files: [
+        "src/main/java/app/MemoryTracker.java",
+        "src/test/java/app/MemoryTrackerTest.java"
+      ],
+      symbols: ["recallFailed"],
+      terms: ["regression"]
+    },
+    qualityRubric: [],
+    gateAssertions: []
+  };
+  const result = scoreSuiteIdeaQuality(task, JSON.stringify({
+    findings: [{
+      severity: "P1",
+      file: "src/main/java/app/MemoryTracker.java",
+      symbol: "recallFailed",
+      issue: "regression in wrong-answer scheduling"
+    }],
+    business_coverage: ["wrong-answer retry behavior remains covered"],
+    similar_logic: ["recalledSuccessfully is intentionally different"],
+    missing_tests: ["add src/test/java/app/MemoryTrackerTest.java regression test"],
+    files: ["src/main/java/app/MemoryTracker.java", "src/test/java/app/MemoryTrackerTest.java"],
+    symbols: ["recallFailed"],
+    risks: ["retry window regression"]
+  }));
+
+  assert.equal(result.passedGate, true);
+  assert.ok(result.score >= 0.75);
 });
