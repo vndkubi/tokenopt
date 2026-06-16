@@ -695,6 +695,61 @@ test("mcp does not mark target-specific business task answerable without target 
   );
 });
 
+test("mcp requires feature test grounding for PBI business investigation", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-pbi-business-repo-"));
+  fs.mkdirSync(path.join(repo, "backend", "src", "main", "java", "app", "recall"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "frontend", "src", "pages"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "recall-product", version: "1.0.0", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.writeFileSync(
+    path.join(repo, "README.md"),
+    [
+      "# Recall Product",
+      "",
+      "Recall Product helps learners review due memory trackers, continue recall sessions, and decide when to load more recall work."
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "backend", "src", "main", "java", "app", "recall", "RecallService.java"),
+    [
+      "class RecallService {",
+      "  DueMemoryTrackers getDueMemoryTrackers(int dueindays) { return null; }",
+      "  void setCurrentRecallWindowEndAt() {}",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "frontend", "src", "pages", "RecallPage.vue"),
+    "<template><button>Load more from next 3 days</button></template><script>const treadmillMode = true;</script>\n"
+  );
+
+  await withTokenOptMcp(
+    async (client) => {
+      const packet = await client.callTool({
+        name: "tokenopt_compile_evidence",
+        arguments: {
+          task: "Daily task: investigate this PBI before planning edits. PBI: Recall page should show forecast counts for due windows 0, 3, 7, and 14 days. Acceptance criteria: use currentRecallWindowEndAt, dueindays, Load more buttons, and treadmill mode. Return valid compact JSON only with keys: pbi_summary, business_flow, impacted_files, symbols, unknowns, risks, next_steps.",
+          task_type: "research_business",
+          cwd: repo,
+          detail: "full",
+          quality_rubric: ["identify source files", "identify existing tests"]
+        }
+      });
+      assert.equal(packet.isError ?? false, false);
+      assert.match(packet.content[0].text, /task_type: research_business/);
+      assert.match(packet.content[0].text, /answerable: false/);
+      assert.match(packet.content[0].text, /feature_source_grounding: covered/);
+      assert.match(packet.content[0].text, /feature_frontend_grounding: covered/);
+      assert.match(packet.content[0].text, /feature_test_grounding: missing/);
+      assert.match(packet.content[0].text, /Feature-specific test evidence is missing/);
+      assert.match(packet.content[0].text, /tokenopt_search: Find existing tests\/examples/);
+    },
+    { cwd: repo }
+  );
+});
+
 test("mcp compiles daily flow evidence from exact behavior anchors", async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-daily-flow-repo-"));
   fs.mkdirSync(path.join(repo, "server", "src", "main", "java", "org", "example", "search"), { recursive: true });

@@ -2554,6 +2554,12 @@ interface BusinessProfile {
   majorAreas: string[];
   domainTerms: string[];
   docSignals: string[];
+  featureTerms: string[];
+  featureSearchHits: FlowSearchHit[];
+  featureSourceFiles: string[];
+  featureBackendFiles: string[];
+  featureFrontendFiles: string[];
+  featureTestFiles: string[];
   hasPurposeSignal: boolean;
   hasDeepDiveSignal: boolean;
 }
@@ -3374,7 +3380,7 @@ function isDailyTestPlanTask(task: string): boolean {
 }
 
 function isSourceFlowFile(filePath: string): boolean {
-  return /\.(ts|tsx|js|jsx|java|py|go|rs|kt|scala|cs)$/i.test(filePath) && !isTestFlowFile(filePath) && !isGeneratedFlowFile(filePath);
+  return /\.(ts|tsx|js|jsx|vue|java|py|go|rs|kt|scala|cs)$/i.test(filePath) && !isTestFlowFile(filePath) && !isGeneratedFlowFile(filePath);
 }
 
 function isTestFlowFile(filePath: string): boolean {
@@ -3418,10 +3424,22 @@ function compileBusinessResearchEvidence(
   firstEvidenceIndex: number,
   context: EvidenceContext
 ): TaskSpecificEvidence {
-  const profile = extractBusinessProfile(repoRoot, context);
-  const answerable = profile.hasPurposeSignal && profile.hasDeepDiveSignal;
+  const profile = extractBusinessProfile(repoRoot, context, task);
+  const needsFeatureEvidence = businessTaskNeedsFeatureEvidence(task);
+  const wantsFeatureTests = businessTaskWantsTestEvidence(task);
+  const hasFeatureSourceEvidence = !needsFeatureEvidence || profile.featureSourceFiles.length > 0;
+  const hasFeatureTestEvidence = !wantsFeatureTests || profile.featureTestFiles.length > 0;
+  const answerable = profile.hasPurposeSignal && profile.hasDeepDiveSignal && hasFeatureSourceEvidence && hasFeatureTestEvidence;
   const confidence = answerable ? (profile.docSignals.length >= 3 ? 0.88 : 0.82) : 0.58;
   const needsDeepDive = /\b(deep\s*dive|detail|detailed|explain|study)\b/i.test(task);
+  const businessMissing = buildBusinessResearchMissing(profile, {
+    answerable,
+    needsFeatureEvidence,
+    wantsFeatureTests,
+    hasFeatureSourceEvidence,
+    hasFeatureTestEvidence,
+    mentionsFrontend: businessTaskMentionsFrontend(task)
+  });
 
   return {
     answerable,
@@ -3432,12 +3450,29 @@ function compileBusinessResearchEvidence(
       likely_users: profile.likelyUsers ? "covered" : "partial",
       core_capabilities: profile.coreCapabilities.length > 0 ? "covered" : "partial",
       major_project_areas: profile.majorAreas.length > 0 ? "covered" : "missing",
-      source_grounding: profile.files.length > 0 ? "covered" : "partial"
+      source_grounding: profile.files.length > 0 ? "covered" : "partial",
+      feature_source_grounding: needsFeatureEvidence
+        ? profile.featureSourceFiles.length > 0 ? "covered" : "missing"
+        : "covered",
+      feature_backend_or_domain_grounding: needsFeatureEvidence
+        ? profile.featureBackendFiles.length > 0 ? "covered" : profile.featureSourceFiles.length > 0 ? "partial" : "missing"
+        : "covered",
+      feature_frontend_grounding: needsFeatureEvidence && businessTaskMentionsFrontend(task)
+        ? profile.featureFrontendFiles.length > 0 ? "covered" : "missing"
+        : needsFeatureEvidence && profile.featureFrontendFiles.length > 0 ? "covered" : "partial",
+      feature_test_grounding: wantsFeatureTests
+        ? profile.featureTestFiles.length > 0 ? "covered" : "missing"
+        : "partial",
+      business_invariants: needsFeatureEvidence
+        ? profile.featureSearchHits.length > 0 ? "partial" : "missing"
+        : profile.hasDeepDiveSignal ? "partial" : "missing"
     },
     evidence: [
       {
         id: `E${firstEvidenceIndex}`,
-        claim: "Business/domain profile was synthesized deterministically from root docs, docs headings, package/build identity, and bounded repo inventory.",
+        claim: needsFeatureEvidence
+          ? "Business/domain profile was synthesized from docs plus bounded feature-specific source/test searches."
+          : "Business/domain profile was synthesized deterministically from root docs, docs headings, package/build identity, and bounded repo inventory.",
         files: profile.files,
         facts: [
           `business_purpose=${profile.purpose}`,
@@ -3446,10 +3481,16 @@ function compileBusinessResearchEvidence(
           `major_project_areas=${profile.majorAreas.join(" | ") || "none_detected"}`,
           `domain_terms=${profile.domainTerms.join(",") || "none_detected"}`,
           `doc_signals=${profile.docSignals.join(" | ") || "none_detected"}`,
+          `feature_terms=${profile.featureTerms.join(",") || "none_detected"}`,
+          `feature_exact_matches=${formatFlowSearchHits(profile.featureSearchHits, 10) || "none_detected"}`,
+          `feature_source_files=${profile.featureSourceFiles.join(",") || "none_detected"}`,
+          `feature_backend_files=${profile.featureBackendFiles.join(",") || "none_detected"}`,
+          `feature_frontend_files=${profile.featureFrontendFiles.join(",") || "none_detected"}`,
+          `feature_test_files=${profile.featureTestFiles.join(",") || "none_detected"}`,
           `build_identity=${context.facts.slice(0, 8).join(" | ")}`,
           `structure_signals=${context.structureFacts.join(" | ")}`
         ],
-        tokens_est: 420
+        tokens_est: needsFeatureEvidence ? 560 : 420
       },
       {
         id: `E${firstEvidenceIndex + 1}`,
@@ -3463,35 +3504,12 @@ function compileBusinessResearchEvidence(
         tokens_est: 120
       }
     ],
-    missing: answerable
-      ? []
-      : [
-          "Business purpose or domain details are only partially evident from deterministic docs/inventory.",
-          "Use exact TokenOpt searches for named product/domain terms from README/docs; do not use raw shell grep."
-        ],
-    allowedFollowups: answerable
-      ? []
-      : [
-          {
-            tool: "tokenopt_search",
-            reason: "Search for exact business/domain terms from README or docs, scoped to docs/source areas.",
-            args: {
-              pattern: profile.domainTerms[0] ?? "<exact-domain-term>",
-              path: profile.files.find((file) => file.startsWith("docs/")) ? "docs" : "."
-            },
-            max_output_tokens: 700
-          },
-          {
-            tool: "tokenopt_read_file",
-            reason: "Read a bounded slice of the most relevant README/docs/source file.",
-            args: { path: profile.files[0] ?? "README.md", startLine: 1, maxLines: 160 },
-            max_output_tokens: 900
-          }
-        ]
+    missing: businessMissing,
+    allowedFollowups: answerable ? [] : buildBusinessResearchFollowups(profile, needsFeatureEvidence, wantsFeatureTests)
   };
 }
 
-function extractBusinessProfile(repoRoot: string, context: EvidenceContext): BusinessProfile {
+function extractBusinessProfile(repoRoot: string, context: EvidenceContext, task: string): BusinessProfile {
   const docs = collectBusinessDocs(repoRoot, context.overview?.file);
   const purpose = cleanFactValue(
     context.overview?.summary ||
@@ -3515,11 +3533,30 @@ function extractBusinessProfile(repoRoot: string, context: EvidenceContext): Bus
     ...(context.overview ? [`${context.overview.file}: ${context.overview.title}`] : []),
     ...docs.headings.slice(0, 8)
   ].map(cleanFactValue).filter(Boolean);
+  const featureTerms = selectBusinessFeatureTerms(task);
+  const featureSearchHits = collectFlowSearchHits(repoRoot, selectExactFlowSearchTerms(featureTerms).slice(0, 6));
+  const featureHitFiles = uniqueStrings(featureSearchHits.map((hit) => hit.file));
+  const importantFiles = context.inventory.importantFiles.map((file) => file.replace(/\\/g, "/"));
+  const featureCandidateFiles = prioritizeFlowFiles(uniqueStrings([...importantFiles, ...featureHitFiles]));
+  const featureSourceFiles = featureCandidateFiles
+    .filter((file) => isSourceFlowFile(file) && (featureHitFiles.includes(file) || pathMatchesTerms(file, featureTerms)))
+    .slice(0, 14);
+  const featureBackendFiles = featureSourceFiles
+    .filter((file) => isBackendBusinessFile(file))
+    .slice(0, 8);
+  const featureFrontendFiles = featureSourceFiles
+    .filter((file) => isFrontendBusinessFile(file))
+    .slice(0, 8);
+  const featureTestFiles = featureCandidateFiles
+    .filter((file) => isTestFlowFile(file) && (featureHitFiles.includes(file) || pathMatchesTerms(file, featureTerms)))
+    .slice(0, 10);
 
   return {
     files: uniqueStrings([
       ...(context.overview ? [context.overview.file] : []),
       ...docs.files,
+      ...featureSourceFiles,
+      ...featureTestFiles,
       ...context.inventory.importantFiles
         .filter((file) => /(^|\/)(docs|src|server|client|app|lib|core|modules|plugins|x-pack|hadoop-[^/]+)(\/|$)/i.test(file))
         .slice(0, 12)
@@ -3530,9 +3567,169 @@ function extractBusinessProfile(repoRoot: string, context: EvidenceContext): Bus
     majorAreas,
     domainTerms,
     docSignals,
+    featureTerms,
+    featureSearchHits,
+    featureSourceFiles,
+    featureBackendFiles,
+    featureFrontendFiles,
+    featureTestFiles,
     hasPurposeSignal: purpose !== "purpose_not_explicit_in_root_docs",
     hasDeepDiveSignal: majorAreas.length > 0 || coreCapabilities.length > 0 || domainTerms.length >= 4 || docs.headings.length >= 3
   };
+}
+
+function businessTaskNeedsFeatureEvidence(task: string): boolean {
+  const text = stripOutputContractText(task);
+  return /\b(PBI|acceptance criteria|bug|regression|wrong answer|incorrect|retry|forecast|API exposes|frontend|backend|UI|page|symbols|files|existing_tests|impacted_files|business_flow|core_entities|code path|fix handoff|learner recall|due recall|current recall|answering questions|spelling|non-spelling|scheduling|treadmill|load more)\b/i.test(text);
+}
+
+function businessTaskWantsTestEvidence(task: string): boolean {
+  const text = stripOutputContractText(task);
+  return /\b(existing_tests|tests?_to_run|test|tests|regression|acceptance criteria|bug|quality|coverage)\b/i.test(text);
+}
+
+function businessTaskMentionsFrontend(task: string): boolean {
+  return /\b(frontend|UI|page|button|buttons|composable|state|treadmill|Load more|current-session|session)\b/i.test(stripOutputContractText(task));
+}
+
+function selectBusinessFeatureTerms(task: string): string[] {
+  const taskText = stripOutputContractText(task);
+  const lower = taskText.toLowerCase();
+  const terms = uniqueStrings([
+    ...extractQuotedTerms(taskText),
+    ...extractCodeLikeTaskTerms(taskText),
+    ...extractStrongCodeLikeTaskTerms(taskText),
+    ...extractHyphenatedIdentifierVariants(taskText),
+    ...extractRouteTerms(taskText)
+  ]).filter(isUsefulFlowSearchTerm);
+
+  const add = (term: string): void => {
+    if (isUsefulFlowSearchTerm(term) && !terms.some((existing) => existing.toLowerCase() === term.toLowerCase())) {
+      terms.push(term);
+    }
+  };
+
+  if (lower.includes("recall")) {
+    add("recalling");
+    add("RecallPage");
+    add("useRecallData");
+    add("RecallsController");
+    add("RecallPromptController");
+    add("RecallService");
+    add("MemoryTracker");
+    add("ForgettingCurve");
+    add("getDueMemoryTrackers");
+    add("markAsRecalled");
+    add("answerQuiz");
+    add("answerSpelling");
+  }
+  if (/\b(wrong|incorrect|failed|failure|retry|12\s*hours?)\b/.test(lower)) {
+    add("recallFailed");
+    add("TimestampOperations.addHoursToTimestamp");
+    add("nextRecallAt");
+  }
+  if (/\b(forecast|dueindays|due in days|load more|current recall window|half-day|half day|treadmill)\b/.test(lower)) {
+    add("DueMemoryTrackers");
+    add("dueindays");
+    add("currentRecallWindowEndAt");
+    add("setCurrentRecallWindowEndAt");
+    add("loadMore");
+    add("loadCurrentDueRecalls");
+    add("treadmillMode");
+  }
+
+  return selectExactFlowSearchTerms(terms).slice(0, 12);
+}
+
+function isBackendBusinessFile(filePath: string): boolean {
+  return /(^|\/)(backend|server|src\/main|controllers?|services?|entities?|domain|models?|dto|repository|repositories)(\/|$)|\.(java|kt|scala|py|go|rs|cs)$/i.test(filePath);
+}
+
+function isFrontendBusinessFile(filePath: string): boolean {
+  return /(^|\/)(frontend|client|web|pages?|components?|composables?|stores?|views?)(\/|$)|\.(vue|tsx|jsx)$/i.test(filePath);
+}
+
+function buildBusinessResearchMissing(
+  profile: BusinessProfile,
+  input: {
+    answerable: boolean;
+    needsFeatureEvidence: boolean;
+    wantsFeatureTests: boolean;
+    hasFeatureSourceEvidence: boolean;
+    hasFeatureTestEvidence: boolean;
+    mentionsFrontend: boolean;
+  }
+): string[] {
+  if (input.answerable) {
+    return [];
+  }
+  const missing: string[] = [];
+  if (!profile.hasPurposeSignal || !profile.hasDeepDiveSignal) {
+    missing.push("Business purpose or domain details are only partially evident from deterministic docs/inventory.");
+  }
+  if (input.needsFeatureEvidence && !input.hasFeatureSourceEvidence) {
+    missing.push("Feature-specific source evidence is missing for the requested business/PBI/bug target.");
+  }
+  if (input.needsFeatureEvidence && profile.featureBackendFiles.length === 0) {
+    missing.push("Backend/API/service/domain evidence is missing or only weakly inferred for the requested feature.");
+  }
+  if (input.needsFeatureEvidence && input.mentionsFrontend && profile.featureFrontendFiles.length === 0) {
+    missing.push("Frontend/page/state evidence is missing for a UI-facing business request.");
+  }
+  if (input.wantsFeatureTests && !input.hasFeatureTestEvidence) {
+    missing.push("Feature-specific test evidence is missing for the requested behavior.");
+  }
+  missing.push("Use exact TokenOpt searches for named product/domain/source/test terms; do not use raw shell grep.");
+  return missing;
+}
+
+function buildBusinessResearchFollowups(profile: BusinessProfile, needsFeatureEvidence: boolean, wantsFeatureTests: boolean): EvidenceFollowup[] {
+  if (needsFeatureEvidence) {
+    const primaryPattern = profile.featureTerms[0] ?? profile.domainTerms[0] ?? "<exact-feature-term>";
+    const sourceFile = profile.featureSourceFiles[0];
+    const followups: EvidenceFollowup[] = [
+      {
+        tool: "tokenopt_search",
+        reason: "Find exact source evidence for the requested business/PBI/bug target.",
+        args: { pattern: primaryPattern, path: "." },
+        max_output_tokens: 800
+      }
+    ];
+    if (sourceFile) {
+      followups.push({
+        tool: "tokenopt_read_file",
+        reason: "Read a bounded slice around the most relevant source match.",
+        args: { path: sourceFile, startLine: 1, maxLines: 180 },
+        max_output_tokens: 1100
+      });
+    }
+    if (wantsFeatureTests) {
+      followups.push({
+        tool: "tokenopt_search",
+        reason: "Find existing tests/examples for the requested feature behavior.",
+        args: { pattern: primaryPattern, path: profile.featureTestFiles.length > 0 ? path.dirname(profile.featureTestFiles[0]!) : "." },
+        max_output_tokens: 800
+      });
+    }
+    return followups;
+  }
+  return [
+    {
+      tool: "tokenopt_search",
+      reason: "Search for exact business/domain terms from README or docs, scoped to docs/source areas.",
+      args: {
+        pattern: profile.domainTerms[0] ?? "<exact-domain-term>",
+        path: profile.files.find((file) => file.startsWith("docs/")) ? "docs" : "."
+      },
+      max_output_tokens: 700
+    },
+    {
+      tool: "tokenopt_read_file",
+      reason: "Read a bounded slice of the most relevant README/docs/source file.",
+      args: { path: profile.files[0] ?? "README.md", startLine: 1, maxLines: 160 },
+      max_output_tokens: 900
+    }
+  ];
 }
 
 function collectBusinessDocs(repoRoot: string, overviewFile: string | undefined): {

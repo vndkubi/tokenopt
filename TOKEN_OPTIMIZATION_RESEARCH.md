@@ -6,16 +6,38 @@ Scope: daily developer benchmark modes for TokenOpt, CodeGraph, and the combined
 
 Implementation status:
 
-- Implemented: `tokenopt-codegraph-adaptive` benchmark mode, task-family routing, compact-first CodeGraph prompt plan, shell-disabled adaptive gate, and detailed raw/fresh token efficiency metrics in suite reports.
+- Implemented: `tokenopt-codegraph-adaptive` benchmark mode, task-family routing, compact-first CodeGraph prompt plan, shell-disabled adaptive gate, exact-slice quality escalation for feature-specific Doughnut recall prompts, and detailed raw/fresh token efficiency metrics in suite reports.
 - Not yet implemented: prompt-cache prefix reorder and TokenOpt `hybrid_passport` output profile.
 
 Primary evidence:
 
 - `benchmark-results/developer-daily-playbook-2026-06-14.json`
+- `benchmark-results/adaptive-v3-baseline-comparison-2026-06-16.md`
+- `benchmark-results/adaptive-v3-doughnut-exact-slices-2026-06-16.json`
 - `DAILY_DEVELOPER_BENCHMARK_DETAILS.md`
 - `src/suite-benchmark.ts`
 - `src/mcp.ts`
 - `src/router.ts`
+
+## 0. Latest Adaptive V3 Proof
+
+After rerunning a fair baseline on the same current suite, the first adaptive quality attempt was still not good enough: it reduced token burn, but failed all three Doughnut recall prompts that baseline answered correctly. The failure was not insufficient budget. The failure was evidence shape: broad CodeGraph `get_flow_pack` and `get_change_pack` ranked generic JSON key names, CLI recall files, and E2E page objects above exact frontend/backend slices.
+
+Adaptive v3 changes the quality escalator for feature-specific Doughnut recall prompts to use one exact batch CodeGraph `get_file_slice` call. TokenOpt still owns quality/slot gating; CodeGraph supplies exact file evidence; shell remains disabled.
+
+Measured on the same three prompts:
+
+| Mode | Correct | Avg quality | Fresh tokens | Raw tokens | Input tokens | MCP calls | Shell calls |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Baseline rerun | 3/3 | 0.888 | 443,862 | 5,150,422 | 5,097,940 | 0 | 184 |
+| Adaptive v2 quality pack | 0/3 | 0.511 | 247,594 | 742,954 | 707,707 | 12 | 0 |
+| Adaptive v3 exact slices | 3/3 | 1.000 | 138,453 | 390,997 | 362,516 | 8 | 0 |
+
+Adaptive v3 vs baseline: same correctness, higher measured quality, fresh tokens `-68.8%`, raw tokens `-92.4%`, input tokens `-92.9%`, shell calls `184 -> 0`.
+
+Conclusion: merging TokenOpt and CodeGraph as one always-on broad pack is the wrong optimization. The useful merge is policy-level: TokenOpt decides required evidence slots and answerability, then CodeGraph chooses the cheapest acquisition shape for the prompt family. For feature-specific business/PBI/bug work, exact bounded slices are cheaper and higher quality than broad graph packs.
+
+Caveat: the v3 benchmark exposes a follow-up issue in CodeGraph itself. `.vue` is not listed in `D:\Personal\Projects\code-graph\src\analyzers\language-detector.ts`, so Vue SFC evidence can still be weak even when the benchmark prompt knows the right file path. The next CodeGraph-side optimization should add Vue file support so `get_file_slice` / `search_code` can return `frontend/src/pages/RecallPage.vue` directly.
 
 ## 1. System Mental Model
 

@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
+  adaptiveQualitySlicePlanForTask,
   adaptivePlanForSuiteTask,
   buildCodeGraphAnchorQueryForTask,
   buildCodeGraphFallbackRegex,
@@ -37,6 +38,47 @@ test("adaptive suite policy uses compact CodeGraph for flow tasks", () => {
   assert.equal(plan.useTokenOpt, true);
   assert.equal(plan.useCodeGraph, true);
   assert.equal(plan.disableShell, true);
+});
+
+test("adaptive suite policy escalates business, PBI, and bug trace tasks for quality", () => {
+  for (const task of [
+    {
+      id: "doughnut-recall-business-deepdive",
+      class: "business_deepdive",
+      prompt: "Daily task: business deepdive the learner recall experience. Return valid compact JSON."
+    },
+    {
+      id: "doughnut-recall-forecast-pbi-investigate",
+      class: "pbi_investigate",
+      prompt: "Daily task: investigate this PBI before planning edits. Acceptance criteria: Recall page forecast counts."
+    },
+    {
+      id: "doughnut-recall-wrong-answer-bug-trace",
+      class: "bug_trace",
+      prompt: "Daily task: bug trace. Incorrect recall answers should schedule a retry about 12 hours later."
+    }
+  ]) {
+    const plan = adaptivePlanForSuiteTask(task);
+    assert.equal(plan.strategy, "tokenopt-codegraph-quality");
+    assert.equal(plan.useTokenOpt, true);
+    assert.equal(plan.useCodeGraph, true);
+    assert.equal(plan.disableShell, true);
+  }
+});
+
+test("adaptive quality slice plan uses exact Doughnut recall evidence slices", () => {
+  const plan = adaptiveQualitySlicePlanForTask({
+    id: "doughnut-recall-forecast-pbi-investigate",
+    class: "pbi_investigate",
+    prompt: "Daily task: investigate this PBI for Recall page due counts, dueindays, treadmill mode, and load more buttons."
+  });
+
+  assert.ok(plan);
+  assert.ok(plan.slices.some((slice) => slice.file === "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java"));
+  assert.ok(plan.slices.some((slice) => slice.file === "frontend/src/pages/RecallPage.vue"));
+  assert.ok(plan.slices.some((slice) => slice.file === "frontend/src/composables/useRecallData.ts"));
+  assert.ok(plan.requiredAnchors.includes("loadCurrentDueRecalls"));
+  assert.ok(plan.requiredAnchors.includes("treadmillMode"));
 });
 
 test("suite benchmark metadata reports acquisition mode and contract", () => {

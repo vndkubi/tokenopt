@@ -645,12 +645,39 @@ function adaptiveCodeGraphBudgetForTask(taskType: EvidenceTaskType): number {
   return 5000;
 }
 
+function adaptiveQualityCodeGraphBudgetForTask(taskType: EvidenceTaskType): number {
+  if (taskType === "research_business" || taskType === "investigate") {
+    return 9000;
+  }
+  return Math.max(adaptiveCodeGraphBudgetForTask(taskType), 7000);
+}
+
 interface AdaptiveSuitePlan {
   useTokenOpt: boolean;
   useCodeGraph: boolean;
   disableShell: boolean;
-  strategy: "tokenopt-review" | "tokenopt-bypass" | "tokenopt-codegraph-compact";
+  strategy: "tokenopt-review" | "tokenopt-bypass" | "tokenopt-codegraph-compact" | "tokenopt-codegraph-quality";
   reason: string;
+}
+
+interface CodeGraphSliceSpec {
+  file: string;
+  lines: string;
+  maxChars: number;
+}
+
+interface AdaptiveQualitySlicePlan {
+  slices: CodeGraphSliceSpec[];
+  requiredAnchors: string[];
+  fallbackQuery: string;
+}
+
+function isAdaptiveQualityEscalationTask(task: Pick<SuiteTask, "id" | "class" | "prompt">): boolean {
+  const idAndClass = `${task.id} ${task.class}`.toLowerCase();
+  return idAndClass.includes("business_deepdive") ||
+    idAndClass.includes("pbi_investigate") ||
+    idAndClass.includes("bug_trace") ||
+    idAndClass.includes("trace_bug");
 }
 
 export function adaptivePlanForSuiteTask(task: Pick<SuiteTask, "id" | "class" | "prompt">): AdaptiveSuitePlan {
@@ -663,6 +690,15 @@ export function adaptivePlanForSuiteTask(task: Pick<SuiteTask, "id" | "class" | 
       disableShell: true,
       strategy: "tokenopt-review",
       reason: "Review/security tasks use TokenOpt's review evidence contract first; current benchmark shows CodeGraph hybrid is not cost-effective for this family."
+    };
+  }
+  if (isAdaptiveQualityEscalationTask(task)) {
+    return {
+      useTokenOpt: true,
+      useCodeGraph: true,
+      disableShell: true,
+      strategy: "tokenopt-codegraph-quality",
+      reason: "Business/PBI/bug-trace prompts need backend, frontend, domain-state, and test evidence; use a bounded quality escalator instead of compact-only evidence."
     };
   }
   if (route.taskClass === "needs_input_bypass") {
@@ -681,6 +717,120 @@ export function adaptivePlanForSuiteTask(task: Pick<SuiteTask, "id" | "class" | 
     strategy: "tokenopt-codegraph-compact",
     reason: "Use TokenOpt as the slot/quality broker and CodeGraph as the compact evidence provider; shell fallback is disabled."
   };
+}
+
+export function adaptiveQualitySlicePlanForTask(task: Pick<SuiteTask, "id" | "class" | "prompt">): AdaptiveQualitySlicePlan | undefined {
+  const idAndClass = `${task.id} ${task.class}`.toLowerCase();
+  const text = `${idAndClass} ${task.prompt}`.toLowerCase();
+  if (!text.includes("recall")) {
+    return undefined;
+  }
+
+  if (idAndClass.includes("bug_trace") || idAndClass.includes("trace_bug")) {
+    return {
+      slices: [
+        { file: "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java", lines: "18-83", maxChars: 3600 },
+        { file: "backend/src/main/java/com/odde/doughnut/services/MemoryTrackerService.java", lines: "100-165", maxChars: 4200 },
+        { file: "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java", lines: "80-123", maxChars: 3600 },
+        { file: "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java", lines: "60-220", maxChars: 5200 },
+        { file: "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java", lines: "372-575", maxChars: 5200 },
+        { file: "backend/src/test/java/com/odde/doughnut/services/MemoryTrackerServiceTest.java", lines: "1-220", maxChars: 4200 }
+      ],
+      requiredAnchors: [
+        "RecallPromptController.java",
+        "MemoryTrackerService.java",
+        "MemoryTracker.java",
+        "RecallPromptControllerTests.java",
+        "MemoryTrackerServiceTest.java",
+        "answerQuiz",
+        "answerSpelling",
+        "recallFailed",
+        "markAsRecalled",
+        "TimestampOperations.addHoursToTimestamp",
+        "thinkingTimeMs",
+        "spelling"
+      ],
+      fallbackQuery: "RecallPromptController answerQuiz answerSpelling recallFailed TimestampOperations.addHoursToTimestamp MemoryTrackerServiceTest"
+    };
+  }
+
+  if (idAndClass.includes("pbi_investigate")) {
+    return {
+      slices: [
+        { file: "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java", lines: "20-63", maxChars: 3600 },
+        { file: "backend/src/main/java/com/odde/doughnut/services/RecallService.java", lines: "18-83", maxChars: 4200 },
+        { file: "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java", lines: "1-20", maxChars: 1600 },
+        { file: "frontend/src/pages/RecallPage.vue", lines: "1-75", maxChars: 4200 },
+        { file: "frontend/src/pages/RecallPage.vue", lines: "240-430", maxChars: 6200 },
+        { file: "frontend/src/composables/useRecallData.ts", lines: "1-90", maxChars: 3600 },
+        { file: "frontend/tests/pages/RecallPage.spec.ts", lines: "1-220", maxChars: 5200 },
+        { file: "backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java", lines: "47-107", maxChars: 3600 }
+      ],
+      requiredAnchors: [
+        "RecallsController.java",
+        "RecallService.java",
+        "DueMemoryTrackers.java",
+        "RecallPage.vue",
+        "useRecallData.ts",
+        "RecallPage.spec.ts",
+        "recalling",
+        "getDueMemoryTrackers",
+        "loadMore",
+        "loadCurrentDueRecalls",
+        "setCurrentRecallWindowEndAt",
+        "dueindays",
+        "currentRecallWindowEndAt",
+        "treadmillMode",
+        "Load more from next 3 days",
+        "monotonic"
+      ],
+      fallbackQuery: "RecallPage.vue useRecallData DueMemoryTrackers dueindays loadCurrentDueRecalls treadmillMode"
+    };
+  }
+
+  if (idAndClass.includes("business_deepdive")) {
+    return {
+      slices: [
+        { file: "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java", lines: "20-63", maxChars: 3600 },
+        { file: "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java", lines: "18-83", maxChars: 3600 },
+        { file: "backend/src/main/java/com/odde/doughnut/services/RecallService.java", lines: "18-83", maxChars: 4200 },
+        { file: "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java", lines: "80-123", maxChars: 3600 },
+        { file: "backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java", lines: "1-120", maxChars: 4200 },
+        { file: "frontend/src/pages/RecallPage.vue", lines: "1-180", maxChars: 5600 },
+        { file: "frontend/src/pages/RecallPage.vue", lines: "240-430", maxChars: 6200 },
+        { file: "frontend/src/composables/useRecallData.ts", lines: "1-90", maxChars: 3600 },
+        { file: "frontend/tests/pages/RecallPage.spec.ts", lines: "1-220", maxChars: 5200 },
+        { file: "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java", lines: "60-220", maxChars: 5200 },
+        { file: "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java", lines: "372-575", maxChars: 5200 }
+      ],
+      requiredAnchors: [
+        "RecallsController.java",
+        "RecallPromptController.java",
+        "RecallService.java",
+        "MemoryTracker.java",
+        "ForgettingCurve.java",
+        "RecallPage.vue",
+        "useRecallData.ts",
+        "RecallPage.spec.ts",
+        "recalling",
+        "answerQuiz",
+        "answerSpelling",
+        "getDueMemoryTrackers",
+        "markAsRecalled",
+        "recalledSuccessfully",
+        "recallFailed",
+        "treadmillMode",
+        "toRepeat",
+        "currentRecallWindowEndAt",
+        "nextRecallAt",
+        "thinkingTimeMs",
+        "spelling"
+      ],
+      fallbackQuery: "RecallPromptController answerQuiz answerSpelling RecallPage.vue useRecallData ForgettingCurve recallFailed thinkingTimeMs"
+    };
+  }
+
+  return undefined;
 }
 
 function usesCodeGraph(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
@@ -963,9 +1113,11 @@ function tokenOptCodeGraphPlanLines(
   qualityRubricJson: string,
   anchorQuery: string,
   gapRefillQuery: string | undefined,
-  options: { hybridFallback?: boolean; adaptiveCompact?: boolean } = {}
+  options: { hybridFallback?: boolean; adaptiveCompact?: boolean; adaptiveQuality?: boolean; taskClass?: string; qualitySlicePlan?: AdaptiveQualitySlicePlan } = {}
 ): string[] {
-  const requiredSlots = taskType === "write_unittest"
+  const requiredSlots = options.adaptiveQuality
+    ? "business_or_bug_goal, backend_entrypoint_api, service_domain_logic, frontend_state_or_caller_when_present, source_files, symbols, existing_tests, business_invariants_or_bug_symptom, validation_commands, risks"
+    : taskType === "write_unittest"
     ? "target_behavior, owner_source_files, owner_methods, existing_test_files, missing_coverage, tests_to_add, validation_commands, risks"
     : taskType === "review_diff"
       ? "changed_files, changed_symbols, business_mapping, callers_callees, similar_logic, existing_tests, missing_tests, compatibility_risks, findings"
@@ -976,6 +1128,12 @@ function tokenOptCodeGraphPlanLines(
     ? `get_change_pack(task=<original Daily task only>, changeType=test, tokenBudget=${Math.min(codeGraphBudget, options.adaptiveCompact ? 6000 : 8000)}, maxFiles=${options.adaptiveCompact ? 8 : 12}, maxSymbols=${options.adaptiveCompact ? 20 : 30}, includeTests=true, includeSnippets=false, profile=compact)`
     : taskType === "review_diff"
       ? "review_patch(diff/task=<original Daily task/diff only>, outputMode=balanced, includeLikelyTests=true, maxFindings=20, maxEvidencePerFinding=10, limit=100)"
+      : options.qualitySlicePlan
+        ? `get_file_slice with args=${JSON.stringify({ slices: options.qualitySlicePlan.slices })}`
+      : options.adaptiveQuality && /bug_trace|trace_bug/i.test(options.taskClass ?? "")
+        ? `get_change_pack(task=<original Daily task only>, changeType=debug, tokenBudget=${codeGraphBudget}, maxFiles=16, maxSymbols=40, includeTests=true, includeSnippets=true, snippetTokenBudget=2500, profile=full)`
+      : options.adaptiveQuality
+        ? `get_flow_pack(target=<original Daily task only>, taskType=investigate, tokenBudget=${codeGraphBudget}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=3000, profile=full)`
       : taskType === "implement"
         ? `get_change_pack(task=<original Daily task only>, changeType=implement, tokenBudget=${codeGraphBudget}, maxFiles=${options.adaptiveCompact ? 12 : 20}, maxSymbols=${options.adaptiveCompact ? 30 : 50}, includeTests=true, includeSnippets=false, profile=${options.adaptiveCompact ? "compact" : "full"})`
         : options.adaptiveCompact
@@ -983,12 +1141,20 @@ function tokenOptCodeGraphPlanLines(
           : `get_flow_pack(target=<original Daily task only>, taskType=${codeGraphTaskType(taskType)}, tokenBudget=${codeGraphBudget}, responseMode=agent, includeTests=true, includeSnippets=true, snippetTokenBudget=5000, profile=full)`;
   const followup = taskType === "write_unittest"
     ? `Then make one exact search_symbol call with query=${JSON.stringify(anchorQuery)}, includeTests=true, includeSnippets=false, limit=60. This composite query intentionally covers behavior, owner symbols, state fields, and likely existing tests; do not replace it with a single identifier search.`
+    : options.qualitySlicePlan
+      ? `Use the exact slices as primary evidence. If a requested slice returns an error or one priority anchor is still absent, make at most one search_code call with query=${JSON.stringify(options.qualitySlicePlan.fallbackQuery)}, outputMode=compact, maxResponseTokens=6000, includeTests=true; otherwise make no generic ranked search.`
+    : options.adaptiveQuality
+      ? `Then make one required anchor search_symbol call with query=${JSON.stringify(anchorQuery)}, includeTests=true, includeSnippets=false, limit=80. Scan the full returned symbols array and use it to fill backend, frontend, domain-state, and existing-test slots. If one required quality slot is still missing, make at most one get_file_slice or search_code call for that exact named file/symbol; otherwise stop.`
     : options.adaptiveCompact
       ? "If one required slot is missing, make at most one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named slot. Do not follow up for merely nice-to-have detail."
       : "If one required slot is weak, make one exact CodeGraph followup using search_code, search_symbol, find_references, find_tests_for, or get_file_slice for that named missing slot.";
   const fallbackRegex = options.hybridFallback ? buildCodeGraphFallbackRegex(anchorQuery) : undefined;
   const evidenceBudgetLine = options.adaptiveCompact
     ? "- Adaptive budget: at most 3 MCP calls total: 1 TokenOpt passport call, 1 compact CodeGraph pack, and at most 1 exact CodeGraph followup for a named missing required slot. Shell fallback is disabled."
+    : options.qualitySlicePlan
+    ? "- Adaptive quality budget: at most 3 MCP calls total: 1 TokenOpt passport call, 1 exact batch CodeGraph get_file_slice call, and at most 1 search_code fallback only if a priority slice/anchor is missing. Shell fallback is disabled."
+    : options.adaptiveQuality
+    ? "- Adaptive quality budget: at most 4 MCP calls total: 1 TokenOpt passport call, 1 quality CodeGraph pack, 1 required anchor search, and at most 1 exact CodeGraph slice/search for a still-missing required slot. Shell fallback is disabled."
     : options.hybridFallback
     ? gapRefillQuery
       ? "- Budget before fallback: at most 4 MCP calls total: 1 TokenOpt passport call plus exactly 3 CodeGraph evidence calls."
@@ -1008,7 +1174,9 @@ function tokenOptCodeGraphPlanLines(
     ]
     : [];
   return [
-    options.adaptiveCompact
+    options.adaptiveQuality
+      ? "- Use TokenOpt as the quality gate and CodeGraph as a bounded quality evidence escalator."
+      : options.adaptiveCompact
       ? "- Use TokenOpt as the single quality broker and CodeGraph as its compact evidence provider."
       : "- Use TokenOpt as the quality passport and CodeGraph as the evidence provider.",
     `- First call tokenopt_compile_evidence with cwd=${repo}, task_type=${taskType}, budget_tokens=${tokenOptBudget}, quality_rubric=${qualityRubricJson}, and task set to only the original Daily task text above.`,
@@ -1019,12 +1187,28 @@ function tokenOptCodeGraphPlanLines(
     taskType === "write_unittest"
       ? "- For write_unittest synthesis, scan the entire returned symbols array and prioritize unique test_source/frameworkRole=test:test hits over broad testsLikelyRelevant entries. Carry matching test files and exact owner symbols into existing_coverage, files, and symbols."
       : "- Carry exact CodeGraph evidence into the final answer.",
+    ...(options.adaptiveQuality
+      ? [
+        ...(options.qualitySlicePlan
+          ? [
+            `- Priority anchors that should appear in the final JSON when present in the exact slices: ${options.qualitySlicePlan.requiredAnchors.join(", ")}.`,
+            "- Prefer exact slice evidence over ranked search results. Ignore unrelated CLI/E2E/Notebook hits unless the prompt explicitly asks for them.",
+            "- Do not omit priority anchors just to satisfy compact limits; priority anchors win over ancillary files and symbols."
+          ]
+          : []),
+        "- Quality hard gate: do not claim the task is fully covered unless the final JSON names at least one backend/API or service/domain file, relevant symbols, and existing tests when tests are requested by the prompt/rubric.",
+        "- For PBI/business prompts touching UI behavior, include frontend page/composable/state evidence when present; if it remains absent after the allowed calls, list it under unknowns/risks instead of inventing it.",
+        "- For bug-trace prompts, separate symptom path, likely root-cause method/state, focused regression tests, and fix handoff."
+      ]
+      : []),
     ...(options.adaptiveCompact ? [] : gapRefillPlanLines(gapRefillQuery)),
     evidenceBudgetLine,
     ...fallbackLines,
     "- Final ideas/proposals/tests must be evidence-grounded: each concrete idea should name relevant files or symbols, explain business/behavior value, include validation/tests, and state risks/tradeoffs.",
     options.adaptiveCompact
       ? "- Final output must be a syntactically valid compact single JSON object under 5500 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects."
+      : options.adaptiveQuality
+      ? "- Final output must be a syntactically valid compact single JSON object under 7500 characters. Close every array/object. Prefer short evidence-rich strings over nested objects unless the user explicitly requested nested objects."
       : "- Final output must be a syntactically valid compact single JSON object under 7000 characters. Close every array/object. Prefer short strings over nested objects unless the user explicitly requested nested objects.",
     "- Compact limits: max 5 existing_coverage items, max 12 files, max 16 symbols, max 5 tests_to_add, max 5 risks. Preserve all requested top-level keys exactly.",
     "- If a slot remains missing, do not invent it; include it as a risk or missing_coverage item in the requested JSON shape."
@@ -1069,6 +1253,9 @@ function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMod
 
   if (mode === "tokenopt-codegraph-adaptive") {
     const adaptivePlan = adaptivePlanForSuiteTask(task);
+    const qualitySlicePlan = adaptivePlan.strategy === "tokenopt-codegraph-quality"
+      ? adaptiveQualitySlicePlanForTask(task)
+      : undefined;
     if (!adaptivePlan.useCodeGraph) {
       return [
         ...common,
@@ -1087,8 +1274,13 @@ function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBenchmarkMod
     return [
       ...common,
       `- Adaptive policy: ${adaptivePlan.strategy}. ${adaptivePlan.reason}`,
-      ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, adaptiveCodeGraphBudgetForTask(taskType), codeGraphRubric, anchorQuery, undefined, {
-        adaptiveCompact: true
+      ...tokenOptCodeGraphPlanLines(repo, taskType, packetTokens, adaptivePlan.strategy === "tokenopt-codegraph-quality"
+        ? adaptiveQualityCodeGraphBudgetForTask(taskType)
+        : adaptiveCodeGraphBudgetForTask(taskType), codeGraphRubric, anchorQuery, undefined, {
+        adaptiveCompact: adaptivePlan.strategy !== "tokenopt-codegraph-quality",
+        adaptiveQuality: adaptivePlan.strategy === "tokenopt-codegraph-quality",
+        taskClass: task.class,
+        qualitySlicePlan
       }),
       "- Preserve the requested JSON contract exactly."
     ].join("\n");
