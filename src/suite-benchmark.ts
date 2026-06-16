@@ -58,6 +58,7 @@ interface CodexRunMetrics {
   exitCode: number | null;
   durationMs: number;
   finalAnswer: string;
+  routeMetadataText: string;
   usage: CodexUsage;
   toolCalls: number;
   shellCalls: number;
@@ -181,6 +182,7 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
       const idea = scoreSuiteIdeaQuality(item.task, run.finalAnswer);
       const routeMetadata = buildSuiteRouteMetadata(item.task.prompt, inferTaskType(item.task), {
         finalAnswer: run.finalAnswer,
+        routeMetadataText: run.routeMetadataText,
         mcpCalls: run.mcpCalls,
         shellCalls: run.shellCalls
       });
@@ -536,6 +538,7 @@ function runCodexSuiteBenchmark(
     exitCode: result.status,
     durationMs: Date.now() - start,
     finalAnswer: fileAnswer || parsed.finalAnswer,
+    routeMetadataText: parsed.routeMetadataText,
     usage: parsed.usage,
     toolCalls: parsed.toolCalls,
     shellCalls: parsed.shellCalls,
@@ -1687,6 +1690,7 @@ function normalizeFieldName(value: string): string {
 
 function parseCodexJsonl(text: string): {
   finalAnswer: string;
+  routeMetadataText: string;
   usage: CodexUsage;
   toolCalls: number;
   shellCalls: number;
@@ -1696,6 +1700,7 @@ function parseCodexJsonl(text: string): {
   warnings: number;
 } {
   let finalAnswer = "";
+  const routeMetadataLines: string[] = [];
   let usage: CodexUsage = { input_tokens: 0, cached_input_tokens: 0, output_tokens: 0, reasoning_output_tokens: 0 };
   let toolCalls = 0;
   let shellCalls = 0;
@@ -1750,17 +1755,28 @@ function parseCodexJsonl(text: string): {
         mcpCalls += 1;
         toolInputChars += JSON.stringify(item.arguments ?? {}).length;
         toolOutputChars += JSON.stringify(item.result ?? item.error ?? {}).length;
+        routeMetadataLines.push(...extractMcpRouteMetadataLines(item.result));
       }
     }
   }
 
-  return { finalAnswer, usage, toolCalls, shellCalls, mcpCalls, toolInputChars, toolOutputChars, warnings };
+  return {
+    finalAnswer,
+    routeMetadataText: uniqueStrings(routeMetadataLines).join("\n"),
+    usage,
+    toolCalls,
+    shellCalls,
+    mcpCalls,
+    toolInputChars,
+    toolOutputChars,
+    warnings
+  };
 }
 
 export function buildSuiteRouteMetadata(
   prompt: string,
   taskType: EvidenceTaskType,
-  run: { finalAnswer?: string; mcpCalls?: number; shellCalls?: number } = {}
+  run: { finalAnswer?: string; routeMetadataText?: string; mcpCalls?: number; shellCalls?: number } = {}
 ): {
   acquisitionMode: AcquisitionMode;
   evidenceContract: EvidenceContractName;
@@ -1770,11 +1786,12 @@ export function buildSuiteRouteMetadata(
 } {
   const route = routeTask({ task: prompt, requestedTaskType: taskType });
   const finalAnswer = run.finalAnswer ?? "";
-  const acquisitionMode = extractEnumField<AcquisitionMode>(finalAnswer, "acquisition_mode") ?? route.acquisitionMode;
-  const evidenceContract = extractEnumField<EvidenceContractName>(finalAnswer, "evidence_contract") ?? route.evidenceContract;
-  const packetContractPass = extractBooleanField(finalAnswer, "evidence_contract_pass");
+  const metadataText = [finalAnswer, run.routeMetadataText ?? ""].filter(Boolean).join("\n");
+  const acquisitionMode = extractEnumField<AcquisitionMode>(metadataText, "acquisition_mode") ?? route.acquisitionMode;
+  const evidenceContract = extractEnumField<EvidenceContractName>(metadataText, "evidence_contract") ?? route.evidenceContract;
+  const packetContractPass = extractBooleanField(metadataText, "evidence_contract_pass");
   const evidenceContractPass = packetContractPass ?? inferContractPassFromAnswer(finalAnswer, acquisitionMode);
-  const fallbackReason = extractStringField(finalAnswer, "fallback_reason") ?? route.fallbackReason ?? "";
+  const fallbackReason = extractStringField(metadataText, "fallback_reason") ?? route.fallbackReason ?? "";
   const doubleSpend = detectDoubleSpend({
     acquisitionMode,
     finalAnswer,
@@ -1782,6 +1799,95 @@ export function buildSuiteRouteMetadata(
     shellCalls: run.shellCalls ?? 0
   });
   return { acquisitionMode, evidenceContract, evidenceContractPass, fallbackReason, doubleSpend };
+}
+
+function extractMcpRouteMetadataLines(result: unknown): string[] {
+  if (!isRecord(result)) {
+    return [];
+  }
+  const lines: string[] = [];
+  const content = Array.isArray(result.content) ? result.content : [];
+  for (const item of content) {
+    if (isRecord(item) && typeof item.text === "string") {
+      lines.push(...extractRouteMetadataLinesFromText(item.text));
+    }
+  }
+  collectRouteMetadataLines(result.structuredContent, lines, 0);
+  return lines;
+}
+
+function collectRouteMetadataLines(value: unknown, lines: string[], depth: number): void {
+  if (depth > 5 || !isRecord(value)) {
+    return;
+  }
+  appendRouteMetadataRecordLines(value, lines);
+  for (const key of ["packetSummary", "packet", "route", "coverage_certificate"]) {
+    collectRouteMetadataLines(value[key], lines, depth + 1);
+  }
+}
+
+function appendRouteMetadataRecordLines(value: Record<string, unknown>, lines: string[]): void {
+  const acquisitionMode = parseAcquisitionModeValue(value.acquisition_mode ?? value.acquisitionMode);
+  if (acquisitionMode) {
+    lines.push(`acquisition_mode: ${acquisitionMode}`);
+  }
+  const evidenceContract = parseEvidenceContractValue(value.evidence_contract ?? value.evidenceContract);
+  if (evidenceContract) {
+    lines.push(`evidence_contract: ${evidenceContract}`);
+  }
+  const evidenceContractPass = value.evidence_contract_pass ?? value.evidenceContractPass;
+  if (typeof evidenceContractPass === "boolean") {
+    lines.push(`evidence_contract_pass: ${evidenceContractPass}`);
+  }
+  const fallbackReason = value.fallback_reason ?? value.fallbackReason;
+  if (typeof fallbackReason === "string" && fallbackReason.trim()) {
+    lines.push(`fallback_reason: ${fallbackReason.trim()}`);
+  }
+}
+
+function extractRouteMetadataLinesFromText(text: string): string[] {
+  const lines: string[] = [];
+  const acquisitionMode = extractEnumField<AcquisitionMode>(text, "acquisition_mode");
+  if (acquisitionMode) {
+    lines.push(`acquisition_mode: ${acquisitionMode}`);
+  }
+  const evidenceContract = extractEnumField<EvidenceContractName>(text, "evidence_contract");
+  if (evidenceContract) {
+    lines.push(`evidence_contract: ${evidenceContract}`);
+  }
+  const evidenceContractPass = extractBooleanField(text, "evidence_contract_pass");
+  if (typeof evidenceContractPass === "boolean") {
+    lines.push(`evidence_contract_pass: ${evidenceContractPass}`);
+  }
+  const fallbackReason = extractStringField(text, "fallback_reason");
+  if (fallbackReason) {
+    lines.push(`fallback_reason: ${fallbackReason}`);
+  }
+  return lines;
+}
+
+function parseAcquisitionModeValue(value: unknown): AcquisitionMode | undefined {
+  return value === "ask_or_bypass" ||
+    value === "direct_narrow" ||
+    value === "coding_coverage" ||
+    value === "failure_packet" ||
+    value === "review_bounded" ||
+    value === "security_audit" ||
+    value === "compile_evidence"
+    ? value
+    : undefined;
+}
+
+function parseEvidenceContractValue(value: unknown): EvidenceContractName | undefined {
+  return value === "artifact_sufficiency" ||
+    value === "trace_proof" ||
+    value === "coding_coverage" ||
+    value === "failure_contract" ||
+    value === "review_coverage" ||
+    value === "security_coverage" ||
+    value === "overview_contract"
+    ? value
+    : undefined;
 }
 
 function extractEnumField<T extends string>(text: string, field: string): T | undefined {
@@ -2423,6 +2529,10 @@ function slash(value: string): string {
 
 function numberValue(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -143,13 +143,20 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
       assert.equal(packet.isError ?? false, false);
       assert.match(packet.content[0].text, /ContextGate evidence packet compact/);
       assert.match(packet.content[0].text, /coverage contract/);
+      assert.match(packet.content[0].text, /evidence_contract_pass: true/);
+      assert.match(packet.content[0].text, /Missing:\n- none/);
       assert.match(packet.content[0].text, /ContextGate broker inline source evidence/);
+      assert.match(packet.content[0].text, /broker_key_anchors/);
+      assert.match(packet.content[0].text, /OrderService -> src\/orders\/OrderService\.ts/);
       assert.match(packet.content[0].text, /src\/orders\/OrderService\.ts/);
       assert.match(packet.content[0].text, /test\/orders\/OrderService\.test\.ts/);
       assert.equal(packet.structuredContent.broker, "contextgate");
       assert.deepEqual(packet.structuredContent.requiredSlots, ["source_files", "backend_entrypoint_api", "service_domain_logic", "existing_tests", "risks"]);
       assert.equal(packet.structuredContent.effectiveAnswerable, true);
       assert.equal(packet.structuredContent.inlineEvidence.coverage.feature_test_grounding, "covered");
+      assert.equal(packet.structuredContent.inlineEvidence.anchors.some((anchor) => anchor.term === "OrderService"), true);
+      assert.equal(packet.structuredContent.inlineEvidence.slices.some((slice) => Object.hasOwn(slice, "text")), false);
+      assert.equal(packet.structuredContent.inlineEvidence.slices.every((slice) => Number.isInteger(slice.textChars)), true);
       assert.equal(packet.structuredContent.naturalToolPolicy, "coverage-contract");
     },
     { cwd: repo }

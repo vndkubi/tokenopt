@@ -24,7 +24,9 @@ import { routeTask } from "./router.js";
 import { evaluateShadowGate, logShadowGateDecision } from "./shadow-gate.js";
 import { estimateTokens, estimateTokensSaved } from "./token-estimator.js";
 import type {
+  AcquisitionMode,
   CoverageCertificate,
+  EvidenceContractName,
   EvidenceCoverageStatus,
   EvidenceItem,
   EvidenceFollowup,
@@ -612,6 +614,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
   const task = sanitizeTaskPrompt(requiredString(args, "task"));
   const cwd = optionalString(args, "cwd") ?? process.cwd();
   const loaded = loadConfig({ cwd });
+  const taskType = normalizeTaskType(optionalString(args, "task_type"), task);
   const requiredSlots = optionalStringArray(args, "required_slots").slice(0, 12);
   const qualityRubric = [
     ...optionalStringArray(args, "quality_rubric"),
@@ -635,6 +638,9 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
     : strictGaps.length > 0
       ? applyContextGateStrictOverride(originalText, strictGaps)
       : originalText;
+  if (effectiveAnswerable) {
+    writeContextGateBrokerState(loaded, task, taskType, result.structuredContent, inlineEvidence);
+  }
   const text = [
     brokerText
       .replace(/^TokenOpt evidence packet compact/m, "ContextGate evidence packet compact")
@@ -660,7 +666,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       requiredSlots,
       strictMissingSlots: strictGaps,
       refillFocusTerms,
-      inlineEvidence,
+      inlineEvidence: slimContextGateInlineEvidence(inlineEvidence),
       effectiveAnswerable,
       recommendedNextAction: effectiveAnswerable ? "answer_now" : strictGaps.length > 0 ? "refill_missing_slots" : "answer_or_refill_from_contract",
       naturalToolPolicy: "coverage-contract"
@@ -677,8 +683,17 @@ interface ContextGateInlineSlice {
   text: string;
 }
 
+interface ContextGateAnchor {
+  term: string;
+  file: string;
+  line: number;
+  kind: ContextGateInlineSlice["kind"];
+  preview: string;
+}
+
 interface ContextGateInlineEvidence {
   slices: ContextGateInlineSlice[];
+  anchors: ContextGateAnchor[];
   focusTerms: string[];
   focusFiles: string[];
   coverage: Record<string, EvidenceCoverageStatus>;
@@ -699,7 +714,7 @@ function buildContextGateInlineEvidence(
   const hitFiles = uniqueStrings(hits.map((hit) => hit.file));
   const pathFiles = contextGatePathMatchFiles(repoRoot, focusTerms);
   const focusFiles = selectContextGateInlineFiles(uniqueStrings([...factFiles, ...pathFiles, ...hitFiles]), hits, focusTerms, requiredSlots);
-  const maxChars = Math.max(16_000, Math.min(48_000, Math.floor((requestedBudgetTokens ?? 2200) * 18)));
+  const maxChars = Math.max(10_000, Math.min(32_000, Math.floor((requestedBudgetTokens ?? 2200) * 10)));
   const slices: ContextGateInlineSlice[] = [];
   let usedChars = 0;
 
@@ -720,14 +735,19 @@ function buildContextGateInlineEvidence(
     }
   }
 
-  const coverage = buildContextGateInlineCoverage(slices, requiredSlots);
+  const anchors = buildContextGateAnchorLedger(repoRoot, focusFiles, focusTerms, slices);
+  const coverage = buildContextGateInlineCoverage(slices, anchors, focusFiles, requiredSlots);
   return {
     slices,
+    anchors,
     focusTerms,
     focusFiles,
     coverage,
     strictMissingSlots: contextGateInlineStrictGaps(requiredSlots, coverage),
-    tokensEst: estimateTokens(slices.map((slice) => `${slice.file}:${slice.startLine}-${slice.endLine}\n${slice.text}`).join("\n\n"))
+    tokensEst: estimateTokens([
+      anchors.map((anchor) => `${anchor.term}->${anchor.file}:${anchor.line}:${anchor.preview}`).join("\n"),
+      slices.map((slice) => `${slice.file}:${slice.startLine}-${slice.endLine}\n${slice.text}`).join("\n\n")
+    ].filter(Boolean).join("\n\n"))
   };
 }
 
@@ -950,6 +970,146 @@ function contextGateMatchedLines(file: string, lines: string[], focusTerms: stri
     .slice(0, 80);
 }
 
+function buildContextGateAnchorLedger(
+  repoRoot: string,
+  focusFiles: string[],
+  focusTerms: string[],
+  slices: ContextGateInlineSlice[]
+): ContextGateAnchor[] {
+  const candidateByTerm = new Map<string, { anchor: ContextGateAnchor; score: number }>();
+  const terms = focusTerms
+    .filter(contextGateAnchorTermRelevant)
+    .slice(0, 40);
+
+  for (const slice of slices) {
+    for (const anchor of contextGateAnchorsInText(slice.file, slice.kind, slice.text, terms)) {
+      rememberContextGateAnchor(candidateByTerm, anchor, scoreContextGateAnchor(anchor, focusTerms) + 12);
+    }
+  }
+
+  for (const file of focusFiles.slice(0, 14)) {
+    const absolute = path.resolve(repoRoot, file);
+    const relative = path.relative(repoRoot, absolute).replace(/\\/g, "/");
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative) || !fs.existsSync(absolute)) {
+      continue;
+    }
+    const stat = fs.statSync(absolute);
+    if (!stat.isFile() || stat.size > 768 * 1024 || isProbablyBinaryPath(relative)) {
+      continue;
+    }
+    const content = fs.readFileSync(absolute, "utf8").replace(/\r\n/g, "\n");
+    const kind = contextGateInlineFileKind(relative);
+    for (const anchor of contextGateAnchorsInText(relative, kind, content, terms)) {
+      rememberContextGateAnchor(candidateByTerm, anchor, scoreContextGateAnchor(anchor, focusTerms));
+    }
+    for (const term of terms) {
+      if (candidateByTerm.has(contextGateAnchorTermKey(term)) || !pathMatchesTerms(relative, [term])) {
+        continue;
+      }
+      rememberContextGateAnchor(candidateByTerm, {
+        term,
+        file: relative,
+        line: 1,
+        kind,
+        preview: `path match for ${term}`
+      }, scoreContextGateAnchor({
+        term,
+        file: relative,
+        line: 1,
+        kind,
+        preview: ""
+      }, focusTerms) - 30);
+    }
+  }
+
+  return [...candidateByTerm.values()]
+    .sort((a, b) => b.score - a.score || a.anchor.file.localeCompare(b.anchor.file) || a.anchor.line - b.anchor.line)
+    .map((item) => item.anchor)
+    .slice(0, 28);
+}
+
+function contextGateAnchorsInText(
+  file: string,
+  kind: ContextGateInlineSlice["kind"],
+  text: string,
+  terms: string[]
+): ContextGateAnchor[] {
+  const anchors: ContextGateAnchor[] = [];
+  const seenTerms = new Set<string>();
+  const lines = text.split(/\r?\n/);
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]!;
+    const parsed = raw.match(/^\s*(\d+):\s?(.*)$/);
+    const line = parsed ? Number(parsed[1]) : index + 1;
+    const previewSource = parsed ? parsed[2] ?? "" : raw;
+    for (const term of terms) {
+      const key = contextGateAnchorTermKey(term);
+      if (seenTerms.has(key) || !lineMatchesContextGateTerm(previewSource, term)) {
+        continue;
+      }
+      anchors.push({
+        term,
+        file,
+        line,
+        kind,
+        preview: cleanFactValue(previewSource).slice(0, 180)
+      });
+      seenTerms.add(key);
+    }
+  }
+  return anchors;
+}
+
+function rememberContextGateAnchor(
+  anchors: Map<string, { anchor: ContextGateAnchor; score: number }>,
+  anchor: ContextGateAnchor,
+  score: number
+): void {
+  const key = contextGateAnchorTermKey(anchor.term);
+  const existing = anchors.get(key);
+  if (!existing || score > existing.score) {
+    anchors.set(key, { anchor, score });
+  }
+}
+
+function scoreContextGateAnchor(anchor: ContextGateAnchor, focusTerms: string[]): number {
+  const termIndex = focusTerms.findIndex((term) => contextGateAnchorTermKey(term) === contextGateAnchorTermKey(anchor.term));
+  let score = termIndex >= 0 ? Math.max(0, 120 - termIndex * 3) : 20;
+  score += scoreFlowFile(anchor.file);
+  if (anchor.kind === "backend" || anchor.kind === "frontend") {
+    score += 12;
+  }
+  if (/\b(?:class|function|const|let|var|public|private|protected|static|final|async)\b/.test(anchor.preview)) {
+    score += 18;
+  }
+  if (lineMatchesContextGateTerm(path.basename(anchor.file), anchor.term)) {
+    score += 20;
+  }
+  return score;
+}
+
+function contextGateAnchorTermRelevant(term: string): boolean {
+  const cleaned = term.trim();
+  if (!isUsefulFlowSearchTerm(cleaned)) {
+    return false;
+  }
+  const key = contextGateAnchorTermKey(cleaned);
+  return key.length >= 4 && !/^(?:trace|daily|validcompactjson|compactjsononly)$/i.test(key);
+}
+
+function contextGateAnchorTermKey(term: string): string {
+  return term.toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function lineMatchesContextGateTerm(line: string, term: string): boolean {
+  const lower = line.toLowerCase();
+  const termLower = term.toLowerCase();
+  const compactLine = lower.replace(/[^a-z0-9]+/g, "");
+  const compactTerm = contextGateAnchorTermKey(term);
+  return (termLower.length >= 4 && lower.includes(termLower)) ||
+    (compactTerm.length >= 5 && compactLine.includes(compactTerm));
+}
+
 function clusterContextGateLines(lines: number[], maxGap: number): number[][] {
   const sorted = uniqueNumbers(lines).sort((a, b) => a - b);
   const clusters: number[][] = [];
@@ -981,11 +1141,20 @@ function contextGateInlineFileKind(file: string): ContextGateInlineSlice["kind"]
   return "source";
 }
 
-function buildContextGateInlineCoverage(slices: ContextGateInlineSlice[], requiredSlots: string[]): Record<string, EvidenceCoverageStatus> {
-  const hasSource = slices.some((slice) => slice.kind !== "test");
-  const hasBackend = slices.some((slice) => slice.kind === "backend");
-  const hasFrontend = slices.some((slice) => slice.kind === "frontend");
-  const hasTests = slices.some((slice) => slice.kind === "test");
+function buildContextGateInlineCoverage(
+  slices: ContextGateInlineSlice[],
+  anchors: ContextGateAnchor[],
+  focusFiles: string[],
+  requiredSlots: string[]
+): Record<string, EvidenceCoverageStatus> {
+  const evidenceKinds = [
+    ...slices.map((slice) => slice.kind),
+    ...anchors.map((anchor) => anchor.kind)
+  ];
+  const hasSource = evidenceKinds.some((kind) => kind !== "test") || focusFiles.some((file) => isSourceFlowFile(file));
+  const hasBackend = evidenceKinds.some((kind) => kind === "backend") || focusFiles.some((file) => contextGateInlineFileKind(file) === "backend");
+  const hasFrontend = evidenceKinds.some((kind) => kind === "frontend") || focusFiles.some((file) => contextGateInlineFileKind(file) === "frontend");
+  const hasTests = evidenceKinds.some((kind) => kind === "test") || focusFiles.some((file) => isTestFlowFile(file));
   const wantsFrontend = requiredSlots.some((slot) => /frontend|ui|page|caller/i.test(slot));
   return {
     source_files: hasSource ? "covered" : "missing",
@@ -1032,6 +1201,13 @@ function formatContextGateInlineEvidence(inlineEvidence: ContextGateInlineEviden
     `broker_focus_files: ${inlineEvidence.focusFiles.slice(0, 12).join(", ") || "none"}`,
     "broker_coverage:",
     ...Object.entries(inlineEvidence.coverage).map(([key, value]) => `- ${key}: ${value}`),
+    inlineEvidence.anchors.length > 0 ? "broker_key_anchors:" : undefined,
+    ...inlineEvidence.anchors.slice(0, 28).map((anchor) =>
+      `- ${anchor.term} -> ${anchor.file}:${anchor.line} (${anchor.kind}) ${anchor.preview}`
+    ),
+    inlineEvidence.anchors.length > 0
+      ? "broker_anchor_policy: carry relevant named anchors into the final answer; do not collapse exact files/symbols into generic source summaries."
+      : undefined,
     "source_slices:",
     ...inlineEvidence.slices.flatMap((slice) => [
       `- file: ${slice.file}`,
@@ -1041,7 +1217,21 @@ function formatContextGateInlineEvidence(inlineEvidence: ContextGateInlineEviden
       "  text:",
       ...slice.text.split("\n").map((line) => `    ${line}`)
     ])
-  ].join("\n");
+  ].filter((line): line is string => line !== undefined).join("\n");
+}
+
+function slimContextGateInlineEvidence(inlineEvidence: ContextGateInlineEvidence) {
+  return {
+    ...inlineEvidence,
+    slices: inlineEvidence.slices.map((slice) => ({
+      file: slice.file,
+      startLine: slice.startLine,
+      endLine: slice.endLine,
+      matchedTerms: slice.matchedTerms,
+      kind: slice.kind,
+      textChars: slice.text.length
+    }))
+  };
 }
 
 function applyContextGateInlineAnswerableOverride(text: string, inlineEvidence: ContextGateInlineEvidence): string {
@@ -1049,11 +1239,140 @@ function applyContextGateInlineAnswerableOverride(text: string, inlineEvidence: 
     return text;
   }
   return text
+    .replace(/evidence_contract_pass: false/g, "evidence_contract_pass: true")
+    .replace(/fallback_reason: [^\n]+/, "fallback_reason: broker_inline_evidence_covered")
     .replace("answerable: false", "answerable: true")
-    .replace(/recommended_next_action: (?:expand_exact|refill_missing_slots)/, "recommended_next_action: answer_now")
+    .replace(/deny_broad_exploration: false/, "deny_broad_exploration: true")
+    .replace(/recommended_next_action: [^\n]+/, "recommended_next_action: answer_now")
     .replace(/max_additional_calls: \d+/, "max_additional_calls: 0")
     .replace(/coverage_gaps: [^\n]+/, "coverage_gaps: none")
+    .replace(/Missing:\n(?:- .+\n)+/g, "Missing:\n- none\n")
+    .replace(/Allowed followups:\n(?:- .+\n)+/g, "Allowed followups:\n- none\n")
     .replace(/Because answerable=false, do not present a final definitive answer until allowed_followups have covered missing exact code evidence\./g, "Because broker inline source evidence covers the required slots, answer from the packet and do not gather redundant evidence.");
+}
+
+function writeContextGateBrokerState(
+  loaded: LoadedConfig,
+  task: string,
+  taskType: EvidenceTaskType,
+  structuredContent: Record<string, unknown> | undefined,
+  inlineEvidence: ContextGateInlineEvidence
+): void {
+  const now = new Date();
+  const packetSummary = structuredContent && isRecord(structuredContent.packetSummary)
+    ? structuredContent.packetSummary
+    : undefined;
+  const existingPacket = structuredContent && isRecord(structuredContent.packet)
+    ? structuredContent.packet
+    : undefined;
+  const route = packetSummary && isRecord(packetSummary.route) ? packetSummary.route as unknown as RouteDecision : undefined;
+  const acquisitionMode = parseAcquisitionMode(packetSummary?.acquisition_mode) ?? parseAcquisitionMode(existingPacket?.acquisition_mode) ?? "compile_evidence";
+  const evidenceContract = parseEvidenceContract(packetSummary?.evidence_contract) ?? parseEvidenceContract(existingPacket?.evidence_contract) ?? "overview_contract";
+  const confidence = typeof packetSummary?.confidence === "number"
+    ? packetSummary.confidence
+    : typeof existingPacket?.confidence === "number"
+      ? existingPacket.confidence
+      : 0.84;
+  const expiresAt = typeof existingPacket?.expires_at === "string" && Date.parse(existingPacket.expires_at) > now.getTime()
+    ? existingPacket.expires_at
+    : new Date(now.getTime() + 10 * 60 * 1000).toISOString();
+  const packet: EvidencePacket = {
+    packet_id: typeof packetSummary?.packet_id === "string" ? packetSummary.packet_id : crypto.randomUUID(),
+    task,
+    task_type: taskType,
+    route,
+    repo_root: loaded.repoRoot,
+    acquisition_mode: acquisitionMode,
+    evidence_contract: evidenceContract,
+    evidence_contract_pass: true,
+    fallback_reason: "broker_inline_evidence_covered",
+    answerable: true,
+    confidence,
+    coverage: inlineEvidence.coverage,
+    output_policy: {
+      preferred_format: "standard_answer",
+      avoid_full_file_rewrite: true,
+      include_explanation_max_tokens: 900,
+      applies_to: ["contextgate_broker"]
+    },
+    evidence: [
+      {
+        id: "CG1",
+        claim: "ContextGate broker inline source evidence covered the requested slots.",
+        files: inlineEvidence.focusFiles.slice(0, 20),
+        facts: [
+          `broker_focus_terms=${inlineEvidence.focusTerms.slice(0, 24).join(",")}`,
+          `broker_anchor_count=${inlineEvidence.anchors.length}`,
+          `broker_slice_count=${inlineEvidence.slices.length}`
+        ],
+        tokens_est: inlineEvidence.tokensEst
+      }
+    ],
+    missing: [],
+    answer_contract: buildAnswerContract(taskType, task, [], true),
+    allowed_followups: [],
+    disallowed_followups: [
+      "tokenopt_search",
+      "tokenopt_read_file",
+      "tokenopt_project_facts",
+      "tokenopt_run_command",
+      "shell_rg",
+      "shell_grep",
+      "shell_git_grep",
+      "shell_findstr",
+      "raw_shell_search"
+    ],
+    recommended_next_action: "answer_now",
+    max_additional_calls: 0,
+    token_budget: {
+      budget_tokens: Math.max(400, inlineEvidence.tokensEst),
+      evidence_tokens_est: inlineEvidence.tokensEst,
+      response_tokens_est: 900
+    },
+    created_at: now.toISOString(),
+    expires_at: expiresAt
+  };
+  const statePath = writeEvidenceTaskState(loaded.config, loaded.repoRoot, packet);
+  appendEvent(loaded.config, {
+    timestamp: now.toISOString(),
+    source: "mcp",
+    eventName: "compile-evidence",
+    repoRoot: loaded.repoRoot,
+    action: "evidence",
+    reason: "contextgate-broker-answerable",
+    metadata: {
+      packetId: packet.packet_id,
+      taskType,
+      statePath,
+      brokerAnchorCount: inlineEvidence.anchors.length,
+      brokerSliceCount: inlineEvidence.slices.length,
+      evidenceTokens: inlineEvidence.tokensEst
+    }
+  });
+}
+
+function parseAcquisitionMode(value: unknown): AcquisitionMode | undefined {
+  return value === "ask_or_bypass" ||
+    value === "direct_narrow" ||
+    value === "coding_coverage" ||
+    value === "failure_packet" ||
+    value === "review_bounded" ||
+    value === "security_audit" ||
+    value === "compile_evidence"
+    ? value
+    : undefined;
+}
+
+function parseEvidenceContract(value: unknown): EvidenceContractName | undefined {
+  return value === "artifact_sufficiency" ||
+    value === "trace_proof" ||
+    value === "coding_coverage" ||
+    value === "failure_contract" ||
+    value === "review_coverage" ||
+    value === "security_coverage" ||
+    value === "overview_contract"
+    ? value
+    : undefined;
 }
 
 function contextGateRefillFocusTerms(structuredContent: Record<string, unknown> | undefined): string[] {

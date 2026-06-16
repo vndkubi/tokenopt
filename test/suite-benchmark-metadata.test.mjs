@@ -126,6 +126,30 @@ test("suite benchmark metadata reports acquisition mode and contract", () => {
   assert.equal(metadata.doubleSpend, false);
 });
 
+test("suite benchmark metadata can use broker packet when final JSON omits contract fields", () => {
+  const metadata = buildSuiteRouteMetadata(
+    "Daily task: business deepdive the learner recall experience. Return valid compact JSON only with keys: summary, files, symbols, risks.",
+    "research_business",
+    {
+      finalAnswer: JSON.stringify({
+        summary: "RecallPage calls RecallsController.recalling and MemoryTracker handles scheduling.",
+        files: ["frontend/src/pages/RecallPage.vue", "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java"],
+        symbols: ["recalling", "MemoryTracker"],
+        risks: ["validation not run"]
+      }),
+      routeMetadataText: "acquisition_mode: coding_coverage\nevidence_contract: coding_coverage\nevidence_contract_pass: true\nfallback_reason: broker_inline_evidence_covered",
+      mcpCalls: 1,
+      shellCalls: 0
+    }
+  );
+
+  assert.equal(metadata.acquisitionMode, "coding_coverage");
+  assert.equal(metadata.evidenceContract, "coding_coverage");
+  assert.equal(metadata.evidenceContractPass, true);
+  assert.equal(metadata.fallbackReason, "broker_inline_evidence_covered");
+  assert.equal(metadata.doubleSpend, false);
+});
+
 test("suite benchmark metadata flags direct-narrow double spend", () => {
   const metadata = buildSuiteRouteMetadata(
     "Tracebug OrderService.java:42 failing test OrderServiceTest.shouldRejectMissingPartition",
