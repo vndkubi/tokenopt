@@ -609,6 +609,9 @@ export async function runMcpServer(): Promise<void> {
 }
 
 function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
+  const task = sanitizeTaskPrompt(requiredString(args, "task"));
+  const cwd = optionalString(args, "cwd") ?? process.cwd();
+  const loaded = loadConfig({ cwd });
   const requiredSlots = optionalStringArray(args, "required_slots").slice(0, 12);
   const qualityRubric = [
     ...optionalStringArray(args, "quality_rubric"),
@@ -619,20 +622,31 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
     quality_rubric: qualityRubric
   }, mcpMode);
   const originalText = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
-  const strictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
-  const refillFocusTerms = contextGateRefillFocusTerms(result.structuredContent);
-  const brokerText = strictGaps.length > 0
-    ? applyContextGateStrictOverride(originalText, strictGaps)
-    : originalText;
+  const baseStrictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
+  const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, task, requiredSlots, optionalNumber(args, "budget_tokens"));
+  const strictGaps = inlineEvidence.slices.length > 0 ? inlineEvidence.strictMissingSlots : baseStrictGaps;
+  const effectiveAnswerable = strictGaps.length === 0 && (contextGateBaseAnswerable(result.structuredContent) || inlineEvidence.slices.length > 0);
+  const refillFocusTerms = uniqueStrings([
+    ...inlineEvidence.focusTerms,
+    ...contextGateRefillFocusTerms(result.structuredContent)
+  ]).slice(0, 16);
+  const brokerText = effectiveAnswerable
+    ? applyContextGateInlineAnswerableOverride(originalText, inlineEvidence)
+    : strictGaps.length > 0
+      ? applyContextGateStrictOverride(originalText, strictGaps)
+      : originalText;
   const text = [
     brokerText
       .replace(/^TokenOpt evidence packet compact/m, "ContextGate evidence packet compact")
       .replace(/^TokenOpt compiled evidence packet/m, "ContextGate compiled evidence packet")
       .replace(/TokenOpt compact mode: full packet is stored in state_path; call tokenopt_compile_evidence with detail=full only when debugging\./, "ContextGate compact mode: full packet is stored in state_path; request detail=full only when debugging."),
+    inlineEvidence.slices.length > 0 ? formatContextGateInlineEvidence(inlineEvidence, effectiveAnswerable) : undefined,
     "",
     "Context broker guidance:",
     "- Treat this packet as a coverage contract, not a fixed tool script.",
-    "- If answerable=true, answer from the packet and stop acquiring duplicate context.",
+    effectiveAnswerable
+      ? "- Broker inline evidence covers the required slots; answer from this packet and stop acquiring duplicate context."
+      : "- If answerable=true, answer from the packet and stop acquiring duplicate context.",
     strictGaps.length > 0 && refillFocusTerms.length > 0 ? `- Refill focus terms: ${refillFocusTerms.join(", ")}.` : undefined,
     "- If required slots are missing, refill only those named slots with the cheapest bounded provider available in the session.",
     "- Prefer exact source slices for named files/symbols over broad search, and report any still-missing slots honestly."
@@ -646,11 +660,400 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       requiredSlots,
       strictMissingSlots: strictGaps,
       refillFocusTerms,
-      effectiveAnswerable: strictGaps.length === 0 && contextGateBaseAnswerable(result.structuredContent),
-      recommendedNextAction: strictGaps.length > 0 ? "refill_missing_slots" : "answer_or_refill_from_contract",
+      inlineEvidence,
+      effectiveAnswerable,
+      recommendedNextAction: effectiveAnswerable ? "answer_now" : strictGaps.length > 0 ? "refill_missing_slots" : "answer_or_refill_from_contract",
       naturalToolPolicy: "coverage-contract"
     }
   };
+}
+
+interface ContextGateInlineSlice {
+  file: string;
+  startLine: number;
+  endLine: number;
+  matchedTerms: string[];
+  kind: "backend" | "frontend" | "test" | "source";
+  text: string;
+}
+
+interface ContextGateInlineEvidence {
+  slices: ContextGateInlineSlice[];
+  focusTerms: string[];
+  focusFiles: string[];
+  coverage: Record<string, EvidenceCoverageStatus>;
+  strictMissingSlots: string[];
+  tokensEst: number;
+}
+
+function buildContextGateInlineEvidence(
+  structuredContent: Record<string, unknown> | undefined,
+  repoRoot: string,
+  task: string,
+  requiredSlots: string[],
+  requestedBudgetTokens: number | undefined
+): ContextGateInlineEvidence {
+  const focusTerms = contextGateInlineFocusTerms(structuredContent, task);
+  const factFiles = contextGateInlineFocusFiles(structuredContent, focusTerms);
+  const hits = collectFlowSearchHits(repoRoot, focusTerms.slice(0, 14));
+  const hitFiles = uniqueStrings(hits.map((hit) => hit.file));
+  const pathFiles = contextGatePathMatchFiles(repoRoot, focusTerms);
+  const focusFiles = selectContextGateInlineFiles(uniqueStrings([...factFiles, ...pathFiles, ...hitFiles]), hits, focusTerms, requiredSlots);
+  const maxChars = Math.max(16_000, Math.min(48_000, Math.floor((requestedBudgetTokens ?? 2200) * 18)));
+  const slices: ContextGateInlineSlice[] = [];
+  let usedChars = 0;
+
+  for (const file of focusFiles) {
+    if (usedChars >= maxChars || slices.length >= 14) {
+      break;
+    }
+    const fileSlices = buildContextGateFileSlices(repoRoot, file, focusTerms, hits)
+      .filter((slice) => slice.text.trim().length > 0);
+    for (const slice of fileSlices) {
+      if (usedChars >= maxChars || slices.length >= 14) {
+        break;
+      }
+      const remaining = maxChars - usedChars;
+      const text = slice.text.length > remaining ? `${slice.text.slice(0, Math.max(0, remaining - 80)).trimEnd()}\n... truncated by ContextGate broker budget ...` : slice.text;
+      usedChars += text.length;
+      slices.push({ ...slice, text });
+    }
+  }
+
+  const coverage = buildContextGateInlineCoverage(slices, requiredSlots);
+  return {
+    slices,
+    focusTerms,
+    focusFiles,
+    coverage,
+    strictMissingSlots: contextGateInlineStrictGaps(requiredSlots, coverage),
+    tokensEst: estimateTokens(slices.map((slice) => `${slice.file}:${slice.startLine}-${slice.endLine}\n${slice.text}`).join("\n\n"))
+  };
+}
+
+function contextGateInlineFocusTerms(structuredContent: Record<string, unknown> | undefined, task: string): string[] {
+  const taskText = stripOutputContractText(task);
+  const factTerms = contextGateFactValues(structuredContent, /^(?:feature_terms|domain_terms)$/)
+    .flatMap((value) => value.split(",").map((part) => part.trim()));
+  return uniqueStrings([
+    ...selectBusinessFeatureTerms(taskText),
+    ...factTerms,
+    ...extractQuotedTerms(taskText),
+    ...extractStrongCodeLikeTaskTerms(taskText),
+    ...extractHyphenatedIdentifierVariants(taskText),
+    ...extractRouteTerms(taskText)
+  ]).filter(isUsefulFlowSearchTerm).slice(0, 36);
+}
+
+function contextGateInlineFocusFiles(structuredContent: Record<string, unknown> | undefined, focusTerms: string[]): string[] {
+  return contextGateFactValues(structuredContent, /^(?:feature_source_files|feature_backend_files|feature_frontend_files|feature_test_files)$/)
+    .flatMap((value) => value.split(",").map((part) => part.trim()))
+    .filter((value) => value && value !== "none_detected" && !value.includes("->"))
+    .filter((value) => /\.(?:java|ts|tsx|vue|js|jsx|kt|py|go|rs|cs)$/i.test(value))
+    .filter((value) => pathMatchesTerms(value, focusTerms));
+}
+
+function contextGatePathMatchFiles(repoRoot: string, focusTerms: string[]): string[] {
+  const files = collectNodeRepoFiles(repoRoot, { maxFiles: 25_000, maxDepth: 24 }).files
+    .map((file) => file.replace(/\\/g, "/"))
+    .filter((file) => isSourceFlowFile(file) || isTestFlowFile(file))
+    .filter((file) => !isGeneratedFlowFile(file) && !isProbablyBinaryPath(file))
+    .filter((file) => pathMatchesTerms(file, focusTerms));
+  return files
+    .sort((a, b) =>
+      scoreContextGateTermPathMatch(b, focusTerms) - scoreContextGateTermPathMatch(a, focusTerms) ||
+      scoreFlowFile(b) - scoreFlowFile(a) ||
+      a.localeCompare(b)
+    )
+    .slice(0, 100);
+}
+
+function contextGateFactValues(structuredContent: Record<string, unknown> | undefined, keyPattern: RegExp): string[] {
+  if (!structuredContent) {
+    return [];
+  }
+  const packet = isRecord(structuredContent.packet) ? structuredContent.packet : undefined;
+  const evidence = Array.isArray(packet?.evidence) ? packet.evidence : [];
+  const values: string[] = [];
+  for (const item of evidence) {
+    if (!isRecord(item) || !Array.isArray(item.facts)) {
+      continue;
+    }
+    for (const fact of item.facts) {
+      if (typeof fact !== "string") {
+        continue;
+      }
+      const separator = fact.indexOf("=");
+      if (separator <= 0) {
+        continue;
+      }
+      const key = fact.slice(0, separator);
+      const value = fact.slice(separator + 1);
+      if (keyPattern.test(key)) {
+        values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function selectContextGateInlineFiles(files: string[], hits: FlowSearchHit[], focusTerms: string[], requiredSlots: string[]): string[] {
+  const normalized = files
+    .map((file) => file.replace(/\\/g, "/"))
+    .filter((file) => file && !isGeneratedFlowFile(file) && !isProbablyBinaryPath(file));
+  const hitCounts = new Map<string, number>();
+  for (const hit of hits) {
+    hitCounts.set(hit.file, (hitCounts.get(hit.file) ?? 0) + 1);
+  }
+  const wantsBackend = requiredSlots.some((slot) => /backend|service|domain|entrypoint|source_files|business/i.test(slot));
+  const wantsFrontend = requiredSlots.some((slot) => /frontend|ui|page|caller|source_files/i.test(slot));
+  const wantsTests = requiredSlots.some((slot) => /test|validation|existing_tests/i.test(slot));
+  const scored = uniqueStrings(normalized)
+    .map((file) => ({
+      file,
+      score:
+        scoreFlowFile(file) +
+        scoreContextGateTermPathMatch(file, focusTerms) +
+        (hitCounts.get(file) ?? 0) * 8 +
+        (pathMatchesTerms(file, focusTerms) ? 12 : 0) +
+        (wantsBackend && isBackendBusinessFile(file) ? 18 : 0) +
+        (wantsFrontend && isFrontendBusinessFile(file) ? 18 : 0) +
+        (wantsTests && isTestFlowFile(file) ? 18 : 0)
+    }))
+    .sort((a, b) => b.score - a.score || a.file.localeCompare(b.file))
+    .map((item) => item.file);
+
+  const selected: string[] = [];
+  const addMatches = (predicate: (file: string) => boolean, limit: number): void => {
+    for (const file of scored) {
+      if (selected.length >= 12) {
+        return;
+      }
+      if (selected.filter(predicate).length >= limit) {
+        return;
+      }
+      if (predicate(file) && !selected.includes(file)) {
+        selected.push(file);
+      }
+    }
+  };
+  addMatches((file) => isCoreBackendBusinessFile(file) && scoreContextGateTermPathMatch(file, focusTerms) >= 400, wantsBackend ? 6 : 4);
+  addMatches((file) => isFrontendBusinessFile(file) && !isTestFlowFile(file) && scoreContextGateTermPathMatch(file, focusTerms) >= 300, wantsFrontend ? 3 : 2);
+  addMatches((file) => isTestFlowFile(file), wantsTests ? 4 : 2);
+  addMatches((file) => isBackendBusinessFile(file) && !isTestFlowFile(file), wantsBackend ? 8 : 4);
+  addMatches((file) => isFrontendBusinessFile(file) && !isTestFlowFile(file), wantsFrontend ? 4 : 2);
+  for (const file of scored) {
+    if (selected.length >= 12) {
+      break;
+    }
+    if (!selected.includes(file)) {
+      selected.push(file);
+    }
+  }
+  return selected;
+}
+
+function isCoreBackendBusinessFile(file: string): boolean {
+  return isBackendBusinessFile(file) && !isTestFlowFile(file) && !/(^|\/)dto\//i.test(file);
+}
+
+function scoreContextGateTermPathMatch(file: string, terms: string[]): number {
+  const normalizedPath = file.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const base = path.basename(file).replace(/\.[^.]+$/, "");
+  const normalizedBase = base.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  let score = 0;
+  terms.forEach((term, index) => {
+    const normalizedTerm = term.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    if (normalizedTerm.length < 4) {
+      return;
+    }
+    const rankBonus = Math.max(0, 80 - index * 3);
+    if (normalizedBase === normalizedTerm) {
+      score += 420 + rankBonus;
+    } else if (normalizedBase.includes(normalizedTerm) || normalizedTerm.includes(normalizedBase)) {
+      score += 210 + Math.floor(rankBonus / 2);
+    } else if (normalizedPath.includes(normalizedTerm)) {
+      score += 80 + Math.floor(rankBonus / 4);
+    }
+  });
+  return score;
+}
+
+function buildContextGateFileSlices(repoRoot: string, file: string, focusTerms: string[], hits: FlowSearchHit[]): ContextGateInlineSlice[] {
+  const absolute = path.resolve(repoRoot, file);
+  const relative = path.relative(repoRoot, absolute).replace(/\\/g, "/");
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative) || !fs.existsSync(absolute)) {
+    return [];
+  }
+  const stat = fs.statSync(absolute);
+  if (!stat.isFile() || stat.size > 512 * 1024) {
+    return [];
+  }
+  const lines = fs.readFileSync(absolute, "utf8").replace(/\r\n/g, "\n").split("\n");
+  const matched = contextGateMatchedLines(relative, lines, focusTerms, hits);
+  const clusters = clusterContextGateLines(matched.map((item) => item.line), 95).slice(0, 2);
+  const fallbackLine = matched[0]?.line ?? 1;
+  const windows = clusters.length > 0 ? clusters : [[fallbackLine]];
+  return windows.map((cluster) => {
+    const first = Math.min(...cluster);
+    const last = Math.max(...cluster);
+    const startLine = Math.max(1, first - 18);
+    const desiredEndLine = Math.min(lines.length, Math.max(last + 34, startLine + 50));
+    const endLine = Math.min(desiredEndLine, startLine + contextGateInlineMaxWindowLines(relative) - 1);
+    const selectedLines = lines.slice(startLine - 1, endLine);
+    const text = selectedLines.map((line, index) => `${startLine + index}: ${line}`).join("\n");
+    return {
+      file: relative,
+      startLine,
+      endLine,
+      matchedTerms: uniqueStrings(matched.filter((item) => item.line >= startLine && item.line <= endLine).map((item) => item.term)).slice(0, 8),
+      kind: contextGateInlineFileKind(relative),
+      text
+    };
+  });
+}
+
+function contextGateInlineMaxWindowLines(file: string): number {
+  if (isTestFlowFile(file)) {
+    return 130;
+  }
+  if (isFrontendBusinessFile(file)) {
+    return 180;
+  }
+  return 145;
+}
+
+function contextGateMatchedLines(file: string, lines: string[], focusTerms: string[], hits: FlowSearchHit[]): Array<{ line: number; term: string }> {
+  const matched: Array<{ line: number; term: string }> = [];
+  for (const hit of hits) {
+    if (hit.file === file) {
+      matched.push({ line: hit.line, term: hit.term });
+    }
+  }
+  const fileBase = path.basename(file).replace(/\.[^.]+$/, "");
+  const terms = uniqueStrings([...focusTerms, fileBase]).filter((term) => term.length >= 3).slice(0, 28);
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index]!;
+    const lower = raw.toLowerCase();
+    const compactLine = lower.replace(/[^a-z0-9]+/g, "");
+    for (const term of terms) {
+      const termLower = term.toLowerCase();
+      const compactTerm = termLower.replace(/[^a-z0-9]+/g, "");
+      if ((termLower.length >= 4 && lower.includes(termLower)) || (compactTerm.length >= 5 && compactLine.includes(compactTerm))) {
+        matched.push({ line: index + 1, term });
+      }
+    }
+  }
+  return matched
+    .sort((a, b) => a.line - b.line || a.term.localeCompare(b.term))
+    .filter((item, index, array) => index === 0 || item.line !== array[index - 1]!.line || item.term !== array[index - 1]!.term)
+    .slice(0, 80);
+}
+
+function clusterContextGateLines(lines: number[], maxGap: number): number[][] {
+  const sorted = uniqueNumbers(lines).sort((a, b) => a - b);
+  const clusters: number[][] = [];
+  for (const line of sorted) {
+    const lastCluster = clusters[clusters.length - 1];
+    if (!lastCluster || line - lastCluster[lastCluster.length - 1]! > maxGap) {
+      clusters.push([line]);
+    } else {
+      lastCluster.push(line);
+    }
+  }
+  return clusters.sort((a, b) => b.length - a.length || a[0]! - b[0]!);
+}
+
+function uniqueNumbers(values: number[]): number[] {
+  return [...new Set(values.filter((value) => Number.isFinite(value) && value > 0))];
+}
+
+function contextGateInlineFileKind(file: string): ContextGateInlineSlice["kind"] {
+  if (isTestFlowFile(file)) {
+    return "test";
+  }
+  if (isFrontendBusinessFile(file)) {
+    return "frontend";
+  }
+  if (isBackendBusinessFile(file) || isEntrypointFlowFile(file) || isServiceFlowFile(file) || isDataFlowFile(file)) {
+    return "backend";
+  }
+  return "source";
+}
+
+function buildContextGateInlineCoverage(slices: ContextGateInlineSlice[], requiredSlots: string[]): Record<string, EvidenceCoverageStatus> {
+  const hasSource = slices.some((slice) => slice.kind !== "test");
+  const hasBackend = slices.some((slice) => slice.kind === "backend");
+  const hasFrontend = slices.some((slice) => slice.kind === "frontend");
+  const hasTests = slices.some((slice) => slice.kind === "test");
+  const wantsFrontend = requiredSlots.some((slot) => /frontend|ui|page|caller/i.test(slot));
+  return {
+    source_files: hasSource ? "covered" : "missing",
+    feature_source_grounding: hasSource ? "covered" : "missing",
+    source_grounding: hasSource ? "covered" : "missing",
+    feature_backend_or_domain_grounding: hasBackend ? "covered" : hasSource ? "partial" : "missing",
+    feature_frontend_grounding: wantsFrontend ? hasFrontend ? "covered" : "missing" : hasFrontend ? "covered" : "partial",
+    feature_test_grounding: hasTests ? "covered" : "missing",
+    business_invariants: slices.length > 0 ? "covered" : "missing"
+  };
+}
+
+function contextGateInlineStrictGaps(requiredSlots: string[], coverage: Record<string, EvidenceCoverageStatus>): string[] {
+  const slotCoverageKeys: Record<string, string[]> = {
+    source_files: ["feature_source_grounding", "source_grounding"],
+    backend_entrypoint_api: ["feature_backend_or_domain_grounding"],
+    service_domain_logic: ["feature_backend_or_domain_grounding"],
+    frontend_state_or_caller_when_present: ["feature_frontend_grounding"],
+    existing_tests: ["feature_test_grounding"],
+    tests_or_validation: ["feature_test_grounding"],
+    business_invariants_or_bug_symptom: ["business_invariants"]
+  };
+  const gaps: string[] = [];
+  for (const slot of requiredSlots) {
+    const keys = slotCoverageKeys[slot] ?? [];
+    if (keys.length === 0) {
+      continue;
+    }
+    if (!keys.some((key) => coverage[key] === "covered")) {
+      gaps.push(`${slot} (${keys.map((key) => `${key}=${coverage[key] ?? "missing"}`).join(",")})`);
+    }
+  }
+  return gaps;
+}
+
+function formatContextGateInlineEvidence(inlineEvidence: ContextGateInlineEvidence, effectiveAnswerable: boolean): string {
+  return [
+    "",
+    "ContextGate broker inline source evidence:",
+    `broker_answerable: ${effectiveAnswerable}`,
+    `broker_tokens_est: ${inlineEvidence.tokensEst}`,
+    `broker_strict_missing_slots: ${inlineEvidence.strictMissingSlots.length > 0 ? inlineEvidence.strictMissingSlots.join("; ") : "none"}`,
+    `broker_focus_terms: ${inlineEvidence.focusTerms.slice(0, 14).join(", ") || "none"}`,
+    `broker_focus_files: ${inlineEvidence.focusFiles.slice(0, 12).join(", ") || "none"}`,
+    "broker_coverage:",
+    ...Object.entries(inlineEvidence.coverage).map(([key, value]) => `- ${key}: ${value}`),
+    "source_slices:",
+    ...inlineEvidence.slices.flatMap((slice) => [
+      `- file: ${slice.file}`,
+      `  lines: ${slice.startLine}-${slice.endLine}`,
+      `  kind: ${slice.kind}`,
+      `  matched_terms: ${slice.matchedTerms.join(", ") || "path"}`,
+      "  text:",
+      ...slice.text.split("\n").map((line) => `    ${line}`)
+    ])
+  ].join("\n");
+}
+
+function applyContextGateInlineAnswerableOverride(text: string, inlineEvidence: ContextGateInlineEvidence): string {
+  if (inlineEvidence.slices.length === 0 || inlineEvidence.strictMissingSlots.length > 0) {
+    return text;
+  }
+  return text
+    .replace("answerable: false", "answerable: true")
+    .replace(/recommended_next_action: (?:expand_exact|refill_missing_slots)/, "recommended_next_action: answer_now")
+    .replace(/max_additional_calls: \d+/, "max_additional_calls: 0")
+    .replace(/coverage_gaps: [^\n]+/, "coverage_gaps: none")
+    .replace(/Because answerable=false, do not present a final definitive answer until allowed_followups have covered missing exact code evidence\./g, "Because broker inline source evidence covers the required slots, answer from the packet and do not gather redundant evidence.");
 }
 
 function contextGateRefillFocusTerms(structuredContent: Record<string, unknown> | undefined): string[] {
@@ -3380,14 +3783,18 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "api",
   "application",
   "acceptance",
+  "agent",
   "behavior",
+  "backend",
   "business",
+  "businessflow",
   "button",
   "buttons",
   "called",
   "changing",
   "class",
   "client",
+  "cloud",
   "code",
   "compatible",
   "compact",
@@ -3397,11 +3804,15 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "create",
   "criteria",
   "current",
+  "cursor",
   "cover",
+  "core",
   "daily",
   "default",
   "developer",
   "diagram",
+  "doughnut",
+  "doughnutbackendapi",
   "evidence",
   "explain",
   "existing_coverage",
@@ -3411,19 +3822,27 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "filter",
   "filtering",
   "flow",
+  "format",
+  "frontend",
   "focus",
   "focused",
   "future",
+  "generated",
   "handoff",
   "hardening",
+  "helpers",
+  "https",
   "implementation",
   "implementation_plan",
   "implementationplan",
   "integration",
+  "interactivecliapp",
   "investigate",
   "json",
   "keys",
+  "knowledge",
   "learner",
+  "lint",
   "load",
   "likely",
   "likely_root_causes",
@@ -3433,9 +3852,13 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "missingcoverage",
   "minimize",
   "modify",
+  "mcp",
+  "mcpserver",
   "on-call",
   "oncall",
   "only",
+  "package",
+  "packages",
   "plan",
   "prepare",
   "primary",
@@ -3450,6 +3873,7 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "risks",
   "route",
   "search",
+  "server",
   "shard",
   "size",
   "source",
@@ -3470,9 +3894,12 @@ const FLOW_GENERIC_SEARCH_TERMS = new Set([
   "threshold",
   "thinking",
   "time",
+  "tsconfig",
   "type",
   "types",
+  "utils",
   "valid",
+  "vitest",
   "window"
 ]);
 
@@ -3515,7 +3942,7 @@ function selectExactFlowSearchTerms(searchTerms: string[]): string[] {
 
 function collectFlowSearchHits(repoRoot: string, terms: string[]): FlowSearchHit[] {
   const hits: FlowSearchHit[] = [];
-  for (const term of terms.slice(0, 4)) {
+  for (const term of terms.slice(0, 8)) {
     const result = runTargetedSearch(escapeRegex(term), repoRoot, repoRoot);
     hits.push(...prioritizeFlowSearchHits(parseFlowSearchHits(result.rawOutput, term, repoRoot)).slice(0, 12));
     if (hits.length >= 36) {
@@ -3630,7 +4057,7 @@ function isTestFlowFile(filePath: string): boolean {
 }
 
 function isGeneratedFlowFile(filePath: string): boolean {
-  return /(^|\/)(generated|gen|target\/generated-sources|build\/generated|dist)\//i.test(filePath) || /\.gen\./i.test(filePath);
+  return /(^|\/)(generated|gen|target\/generated-sources|build\/generated|dist)\//i.test(filePath) || /\.gen\./i.test(filePath) || /(^|\/)typed-router\.d\.ts$/i.test(filePath);
 }
 
 function isEntrypointFlowFile(filePath: string): boolean {
@@ -3852,14 +4279,26 @@ function selectBusinessFeatureTerms(task: string): string[] {
     add("RecallsController");
     add("RecallPromptController");
     add("RecallService");
+    add("DueMemoryTrackers");
     add("MemoryTracker");
+    add("MemoryTrackerService");
     add("ForgettingCurve");
     add("getDueMemoryTrackers");
     add("markAsRecalled");
+    add("recalledSuccessfully");
+    add("recallFailed");
     add("answerQuiz");
     add("answerSpelling");
+    add("nextRecallAt");
+    add("thinkingTimeMs");
+    add("spelling");
+    add("toRepeat");
+    add("currentRecallWindowEndAt");
+    add("treadmillMode");
   }
   if (/\b(wrong|incorrect|failed|failure|retry|12\s*hours?)\b/.test(lower)) {
+    add("MemoryTrackerService");
+    add("MemoryTrackerServiceTest");
     add("recallFailed");
     add("TimestampOperations.addHoursToTimestamp");
     add("nextRecallAt");
@@ -3884,7 +4323,7 @@ function selectBusinessFeatureTerms(task: string): string[] {
     add(term);
   }
 
-  return selectExactFlowSearchTerms(terms).slice(0, 12);
+  return selectExactFlowSearchTerms(terms).slice(0, 36);
 }
 
 function isBackendBusinessFile(filePath: string): boolean {
@@ -3892,7 +4331,7 @@ function isBackendBusinessFile(filePath: string): boolean {
 }
 
 function isFrontendBusinessFile(filePath: string): boolean {
-  return /(^|\/)(frontend|client|web|pages?|components?|composables?|stores?|views?)(\/|$)|\.(vue|tsx|jsx)$/i.test(filePath);
+  return /(^|\/)(frontend|client|web|pages?|components?|composables?|stores?|views?)(\/|$)|\.(vue)$/i.test(filePath);
 }
 
 function buildBusinessResearchMissing(

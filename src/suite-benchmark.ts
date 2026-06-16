@@ -837,8 +837,11 @@ export function adaptiveQualitySlicePlanForTask(task: Pick<SuiteTask, "id" | "cl
 }
 
 function usesCodeGraph(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
-  if (mode === "tokenopt-codegraph-adaptive" || mode === "contextgate-natural") {
+  if (mode === "tokenopt-codegraph-adaptive") {
     return task ? adaptivePlanForSuiteTask(task).useCodeGraph : true;
+  }
+  if (mode === "contextgate-natural") {
+    return false;
   }
   return mode === "codegraph" || mode === "codegraph-only" || mode === "tokenopt-codegraph" || mode === "tokenopt-codegraph-hybrid";
 }
@@ -1258,6 +1261,7 @@ function naturalContextBrokerPlanLines(
     `- Evidence slots to satisfy before final answer: ${requiredSlots.join(", ")}.`,
     `- Repository root for any context broker or bounded source tool that asks for cwd/root: ${repo}.`,
     `- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=${taskType}, required_slots=${JSON.stringify(requiredSlots)}, budget_tokens around ${packetTokens}, and quality_rubric=${qualityRubricJson}.`,
+    "- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.",
     "- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.",
     "- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.",
     "- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.",
@@ -2437,7 +2441,7 @@ Notes:
   - codegraph-only injects CodeGraph MCP and disables shell_tool.
   - tokenopt-codegraph injects TokenOpt and CodeGraph MCP, disables shell_tool, and measures evidence-grounded idea quality.
   - tokenopt-codegraph-adaptive uses one evidence-broker policy: TokenOpt-only for review/security/missing-artifact tasks, compact TokenOpt+CodeGraph for flow/implement/refactor tasks, and disables shell_tool.
-  - contextgate-natural injects the same context providers as adaptive mode but gives the agent only an evidence-slot contract and natural context-broker guidance, not fixed tool calls.
+  - contextgate-natural injects only the ContextGate broker plus bounded TokenOpt search/read followups; it does not expose CodeGraph directly to the agent.
   - tokenopt-codegraph-hybrid injects TokenOpt and CodeGraph MCP, then allows a bounded exact rg/slice fallback only when CodeGraph is unavailable or missing required slots.
   - --prewarm-codegraph runs codegraph index once per selected repo before Codex runs and adds --no-prewarm to per-run MCP servers.
   - mcp-first injects TokenOpt MCP and allows shell fallback only after exact TokenOpt followups.

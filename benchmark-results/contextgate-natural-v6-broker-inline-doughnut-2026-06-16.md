@@ -1,0 +1,288 @@
+# Context Governor Suite Benchmark
+
+Generated: 2026-06-16T10:01:07.236Z
+Suite: Developer Daily Playbook Suite 2026-06-14
+Runner: codex exec --json (@openai/codex@0.137.0)
+Modes: contextgate-natural
+CodeGraph prewarm: no
+
+## Summary
+
+| Repo | Task | Mode | Acq | Contract | Contract ok | Double | Correct | Quality | Idea | Critical | JSON | Input tok | Cached tok | Delta vs baseline | Output tok | Reason tok | Raw tok | Fresh tok | Q/10k fresh | Tool | MCP | Shell | Tool out chars | Duration ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| doughnut | doughnut-recall-business-deepdive | contextgate-natural | coding_coverage | coding_coverage | no | no | yes | 1.000 | 0.750 | 0 | yes | 168789 | 59136 |  | 5184 | 3305 | 177278 | 118142 | 0.085 | 4 | 4 | 0 | 124038 | 199367 |
+| doughnut | doughnut-recall-forecast-pbi-investigate | contextgate-natural | coding_coverage | coding_coverage | no | no | yes | 0.889 | 1.000 | 2 | yes | 205593 | 169600 |  | 8851 | 6479 | 220923 | 51323 | 0.173 | 5 | 5 | 0 | 126328 | 270007 |
+| doughnut | doughnut-recall-wrong-answer-bug-trace | contextgate-natural | ask_or_bypass | artifact_sufficiency | no | no | yes | 0.813 | 0.875 | 3 | yes | 68321 | 21632 |  | 4446 | 2872 | 75639 | 54007 | 0.151 | 1 | 1 | 0 | 90713 | 154263 |
+
+## Aggregate
+
+| Mode | Runs | Correct | Idea ok | Median input tok | Avg input tok | Avg output tok | Avg raw tok | Avg fresh tok | Avg quality | Avg idea | Avg Q/10k fresh | Avg critical miss | Avg MCP | Avg shell |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| contextgate-natural | 3 | 3/3 | 3/3 | 168789 | 147568 | 6160 | 157947 | 74491 | 0.901 | 0.875 | 0.136 | 1.67 | 3.3 | 0.0 |
+
+## Prompt Family Aggregate
+
+| Family | Mode | Runs | Correct | Idea ok | Median input tok | Avg input tok | Avg output tok | Avg raw tok | Avg fresh tok | Avg quality | Avg idea | Avg Q/10k fresh | Avg critical miss | Avg MCP | Avg shell | Avg duration ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| business_deepdive | contextgate-natural | 1 | 1/1 | 1/1 | 168789 | 168789 | 5184 | 177278 | 118142 | 1.000 | 0.750 | 0.085 | 0.00 | 4.0 | 0.0 | 199367 |
+| pbi_investigate | contextgate-natural | 1 | 1/1 | 1/1 | 205593 | 205593 | 8851 | 220923 | 51323 | 0.889 | 1.000 | 0.173 | 2.00 | 5.0 | 0.0 | 270007 |
+| bug_trace | contextgate-natural | 1 | 1/1 | 1/1 | 68321 | 68321 | 4446 | 75639 | 54007 | 0.813 | 0.875 | 0.151 | 3.00 | 1.0 | 0.0 | 154263 |
+
+## Task Details
+
+### doughnut / doughnut-recall-business-deepdive
+
+Class: business_deepdive
+
+Prompt:
+```
+Daily task: business deepdive the learner recall experience. Explain how due recall loading, answering questions, spelling vs non-spelling paths, scheduling, current recall window metadata, and treadmill mode fit together. Return valid compact JSON only with keys: summary, business_flow, core_entities, files, symbols, existing_tests, risks, next_questions. Do not modify files.
+```
+
+Expected evidence:
+```json
+{
+  "files": [
+    "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+    "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java",
+    "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+    "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java",
+    "backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java",
+    "frontend/src/pages/RecallPage.vue",
+    "frontend/src/composables/useRecallData.ts",
+    "frontend/tests/pages/RecallPage.spec.ts"
+  ],
+  "symbols": [
+    "recalling",
+    "answerQuiz",
+    "answerSpelling",
+    "getDueMemoryTrackers",
+    "markAsRecalled",
+    "recalledSuccessfully",
+    "recallFailed",
+    "treadmillMode"
+  ],
+  "terms": [
+    "toRepeat",
+    "currentRecallWindowEndAt",
+    "nextRecallAt",
+    "thinkingTimeMs",
+    "spelling"
+  ]
+}
+```
+
+Quality rubric:
+- Connects backend recall loading, answer submission, scheduling state, and frontend session behavior.
+- Separates spelling and non-spelling paths and names current-window metadata.
+- Names existing source and test surfaces.
+
+Mode metrics:
+
+| Repo | Task | Mode | Acq | Contract | Contract ok | Double | Correct | Quality | Idea | Critical | JSON | Input tok | Cached tok | Delta vs baseline | Output tok | Reason tok | Raw tok | Fresh tok | Q/10k fresh | Tool | MCP | Shell | Tool out chars | Duration ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| doughnut | doughnut-recall-business-deepdive | contextgate-natural | coding_coverage | coding_coverage | no | no | yes | 1.000 | 0.750 | 0 | yes | 168789 | 59136 |  | 5184 | 3305 | 177278 | 118142 | 0.085 | 4 | 4 | 0 | 124038 | 199367 |
+
+#### Output: contextgate-natural
+
+Raw log: D:\Personal\Projects\tokenopt\benchmark-results\raw\contextgate-natural-v6-broker-inline-doughnut-2026-06-16\doughnut-doughnut-recall-business-deepdive-contextgate-natural.jsonl
+
+Codex prompt used:
+```
+Daily task: business deepdive the learner recall experience. Explain how due recall loading, answering questions, spelling vs non-spelling paths, scheduling, current recall window metadata, and treadmill mode fit together. Return valid compact JSON only with keys: summary, business_flow, core_entities, files, symbols, existing_tests, risks, next_questions. Do not modify files.
+
+Benchmark constraints:
+- Preserve the requested output format exactly.
+- Cite repository-relative files when the task asks for citations.
+- Do not modify files.
+- Repository root: D:\Personal\Projects\doughnut
+- Treat this as a natural developer request. Keep the user's prompt, project instructions, and agent instructions authoritative; this benchmark only adds a bounded evidence contract and output constraints.
+- Evidence slots to satisfy before final answer: source_files, symbols, existing_tests, risks, backend_entrypoint_api, service_domain_logic, frontend_state_or_caller_when_present, business_invariants_or_bug_symptom, validation_commands.
+- Repository root for any context broker or bounded source tool that asks for cwd/root: D:\Personal\Projects\doughnut.
+- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=research_business, required_slots=["source_files","symbols","existing_tests","risks","backend_entrypoint_api","service_domain_logic","frontend_state_or_caller_when_present","business_invariants_or_bug_symptom","validation_commands"], budget_tokens around 1800, and quality_rubric=["Connects backend recall loading, answer submission, scheduling state, and frontend session behavior.","Separates spelling and non-spelling paths and names current-window metadata.","Names existing source and test surfaces."].
+- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.
+- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.
+- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.
+- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.
+- Stop acquiring context once the required slots are covered well enough to answer. Do not duplicate the same evidence through another provider.
+- Shell fallback is disabled in this benchmark mode. If context remains incomplete, state the unresolved slot as a risk, missing_coverage, unknown, or next_question inside the requested JSON shape.
+- Final output must be a syntactically valid compact single JSON object under 7500 characters. Preserve the requested JSON contract exactly.
+- Preserve the requested JSON contract exactly.
+```
+
+Final output:
+```json
+{"summary":"Doughnut's learner recall loop is a half-day spaced-repetition workflow: backend loads due MemoryTracker IDs plus recall-window metadata, frontend stores that session in useRecallData, Quiz routes answers through MCQ/non-spelling or spelling answer APIs, and scheduling updates nextRecallAt through MemoryTracker/ForgettingCurve. TokenOpt effectiveAnswerable=true; no files modified and no validation commands were run.","business_flow":["Due loading: RecallsController.recalling delegates to RecallService.getDueMemoryTrackers, which gathers repeatable trackers up to now plus dueInDays, returns MemoryTrackerLite entries with memoryTrackerId and spelling, and adds dueInDays,totalAssimilatedCount,currentRecallWindowEndAt. Files: backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java, backend/src/main/java/com/odde/doughnut/services/RecallService.java, backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java.","Current window: RecallService sets currentRecallWindowEndAt with TimestampOperations.alignByHalfADay(currentUTCTimestamp,timeZone); previously answered prompts are scoped between startOfHalfADay and alignByHalfADay. File: backend/src/main/java/com/odde/doughnut/services/RecallService.java.","Frontend session: RecallPage consumes useRecallData refs toRepeat,currentRecallWindowEndAt,totalAssimilatedCount,currentIndex,diligentMode,treadmillMode,dueRecallsRefreshNonce; it renders Quiz while there is a current tracker and shows load-more buttons for next 3/7/14 days when the half-day queue is empty. Files: frontend/src/pages/RecallPage.vue, frontend/src/composables/useRecallData.ts.","Answering: non-spelling recalls go through Quiz/AnsweredQuestionComponent and symbols answerQuiz/recalledSuccessfully; spelling recalls are flagged by MemoryTrackerLite.spelling and use answerSpelling/AnsweredSpellingQuestion. Files: frontend/src/pages/RecallPage.vue, backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java, backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java.","Scheduling: MemoryTracker success/failure updates are backed by ForgettingCurve; succeeded(delayInHours,thinkingTimeMs) adjusts the curve using due delay and thinking time, failed() subtracts from the curve, and repeat interval feeds nextRecallAt. Files: backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java, backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java.","Treadmill mode: RecallPage skips spelling trackers when treadmillMode is enabled by scanning from currentIndex to the next !spelling tracker and using that index for Quiz; progress UI receives treadmillMode and can emit treadmill-mode-changed. File: frontend/src/pages/RecallPage.vue."],"core_entities":["MemoryTracker: persisted learner-note scheduling state, including spelling flag and nextRecallAt behavior.","MemoryTrackerLite: lightweight due item sent to frontend with memoryTrackerId and spelling.","DueMemoryTrackers: recall queue DTO containing toRepeat,dueInDays,totalAssimilatedCount,currentRecallWindowEndAt.","RecallPrompt: answered prompt record used for MCQ/spelling answer display and previous-answer history.","ForgettingCurve: domain scheduler for success/failure interval adjustment, including thinkingTimeMs effects.","useRecallData: frontend global recall session state for queue, current window, treadmill mode, diligent mode, current index, and refresh nonce."],"files":["backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java","backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java","backend/src/main/java/com/odde/doughnut/services/RecallService.java","backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java","backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java","backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java","frontend/src/pages/RecallPage.vue","frontend/src/composables/useRecallData.ts","e2e_test/start/pageObjects/recallPage.ts","e2e_test/step_definitions/recall.ts"],"symbols":["RecallsController.recalling","RecallsController.previouslyAnswered","RecallService.getDueMemoryTrackers","RecallService.getPreviouslyAnsweredRecallPrompts","MemoryTracker.markAsRecalled","MemoryTracker.recalledSuccessfully","MemoryTracker.recallFailed","ForgettingCurve.succeeded","ForgettingCurve.failed","RecallPromptController.answerQuiz","RecallPromptController.answerSpelling","MemoryTrackerController.askAQuestion","useRecallData","RecallPage.getCurrentMemoryTracker","RecallPage.getCurrentMemoryTrackerIndex","RecallPage.handleTreadmillModeChanged","DueMemoryTrackers.currentRecallWindowEndAt","MemoryTrackerLite.spelling","MemoryTracker.nextRecallAt"],"existing_tests":[{"file":"backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java","covers":"recalling API, dueInDays, toRepeat, currentRecallWindowEndAt, recall-window loading"},{"file":"backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java","covers":"answerQuiz, answerSpelling, scheduling side effects"},{"file":"backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java","covers":"spaced repetition scheduling behavior"},{"file":"frontend/tests/pages/RecallPage.spec.ts","covers":"RecallPage loading/state with useRecallData, RecallsController, MemoryTrackerController, RecallPromptController mocks"},{"file":"cli/tests/recallJustReviewInteractive.test.tsx","covers":"CLI recall review flow using RecallsController.recalling"},{"file":"e2e_test/step_definitions/recall.ts","covers":"browser-level recall behavior"},{"validation_commands_not_run":["pnpm backend:test","pnpm frontend:test","pnpm cli:test","pnpm cy:run"]}],"risks":["Treadmill mode skips spelling trackers in current item selection, while toRepeatCount is computed as length-currentIndex; progress or completion can be misleading if skipped spelling items remain.","currentRecallWindowEndAt is half-day/timezone aligned, so wrong browser timezone or dueInDays expansion can change what the learner perceives as due now.","Due loading sends only lightweight IDs plus spelling flag; frontend behavior depends on later ask/answer calls, so stale toRepeat/currentIndex state can desync from backend scheduling after answers.","Spelling and non-spelling paths share the recall page but appear to use distinct answer/display paths; changes must preserve both answerQuiz and answerSpelling scheduling semantics.","No validation commands were executed in this no-modification deep dive."],"next_questions":["Should treadmill mode permanently defer spelling recalls, or should skipped spelling items remain visibly queued for later in the same session?","When the learner loads next 3/7/14 days, should currentRecallWindowEndAt still mean the current half-day window or the expanded horizon?","Should thinkingTimeMs influence spelling answers the same way it influences non-spelling successful recalls?"]}
+```
+
+Idea checks: 6/8 (0.750)
+
+Critical misses: none
+
+### doughnut / doughnut-recall-forecast-pbi-investigate
+
+Class: pbi_investigate
+
+Prompt:
+```
+Daily task: investigate this PBI before planning edits. PBI: As a learner, I want the Recall page to show how many recall items are due now and how many more would be loaded from the next 3, 7, and 14 days, so that I can decide whether to continue recalling without blindly clicking each load-more button. Acceptance criteria: the recall API exposes forecast counts for due windows 0, 3, 7, and 14 days using the same timezone and half-day alignment rules as current recall loading; counts are monotonic by window and exclude deleted/removed trackers; existing Load more from next 3/7/14 days behavior remains compatible; Recall page done state/buttons display forecast counts without breaking treadmill mode or current-session progress. Return valid compact JSON only with keys: pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps. Do not modify files.
+```
+
+Expected evidence:
+```json
+{
+  "files": [
+    "backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java",
+    "backend/src/main/java/com/odde/doughnut/services/RecallService.java",
+    "backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java",
+    "frontend/src/pages/RecallPage.vue",
+    "frontend/src/composables/useRecallData.ts",
+    "frontend/tests/pages/RecallPage.spec.ts"
+  ],
+  "symbols": [
+    "recalling",
+    "getDueMemoryTrackers",
+    "DueMemoryTrackers",
+    "loadMore",
+    "loadCurrentDueRecalls",
+    "setCurrentRecallWindowEndAt"
+  ],
+  "terms": [
+    "dueindays",
+    "currentRecallWindowEndAt",
+    "treadmillMode",
+    "Load more from next 3 days",
+    "monotonic"
+  ]
+}
+```
+
+Quality rubric:
+- Translates the PBI into backend API/DTO/service and frontend recall-page impacts.
+- Preserves Load more and treadmill/current-session behavior as compatibility constraints.
+- Identifies monotonicity and timezone/half-day risks.
+
+Mode metrics:
+
+| Repo | Task | Mode | Acq | Contract | Contract ok | Double | Correct | Quality | Idea | Critical | JSON | Input tok | Cached tok | Delta vs baseline | Output tok | Reason tok | Raw tok | Fresh tok | Q/10k fresh | Tool | MCP | Shell | Tool out chars | Duration ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| doughnut | doughnut-recall-forecast-pbi-investigate | contextgate-natural | coding_coverage | coding_coverage | no | no | yes | 0.889 | 1.000 | 2 | yes | 205593 | 169600 |  | 8851 | 6479 | 220923 | 51323 | 0.173 | 5 | 5 | 0 | 126328 | 270007 |
+
+#### Output: contextgate-natural
+
+Raw log: D:\Personal\Projects\tokenopt\benchmark-results\raw\contextgate-natural-v6-broker-inline-doughnut-2026-06-16\doughnut-doughnut-recall-forecast-pbi-investigate-contextgate-natural.jsonl
+
+Codex prompt used:
+```
+Daily task: investigate this PBI before planning edits. PBI: As a learner, I want the Recall page to show how many recall items are due now and how many more would be loaded from the next 3, 7, and 14 days, so that I can decide whether to continue recalling without blindly clicking each load-more button. Acceptance criteria: the recall API exposes forecast counts for due windows 0, 3, 7, and 14 days using the same timezone and half-day alignment rules as current recall loading; counts are monotonic by window and exclude deleted/removed trackers; existing Load more from next 3/7/14 days behavior remains compatible; Recall page done state/buttons display forecast counts without breaking treadmill mode or current-session progress. Return valid compact JSON only with keys: pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps. Do not modify files.
+
+Benchmark constraints:
+- Preserve the requested output format exactly.
+- Cite repository-relative files when the task asks for citations.
+- Do not modify files.
+- Repository root: D:\Personal\Projects\doughnut
+- Treat this as a natural developer request. Keep the user's prompt, project instructions, and agent instructions authoritative; this benchmark only adds a bounded evidence contract and output constraints.
+- Evidence slots to satisfy before final answer: source_files, symbols, existing_tests, risks, backend_entrypoint_api, service_domain_logic, frontend_state_or_caller_when_present, business_invariants_or_bug_symptom, validation_commands.
+- Repository root for any context broker or bounded source tool that asks for cwd/root: D:\Personal\Projects\doughnut.
+- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=research_business, required_slots=["source_files","symbols","existing_tests","risks","backend_entrypoint_api","service_domain_logic","frontend_state_or_caller_when_present","business_invariants_or_bug_symptom","validation_commands"], budget_tokens around 1800, and quality_rubric=["Translates the PBI into backend API/DTO/service and frontend recall-page impacts.","Preserves Load more and treadmill/current-session behavior as compatibility constraints.","Identifies monotonicity and timezone/half-day risks."].
+- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.
+- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.
+- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.
+- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.
+- Stop acquiring context once the required slots are covered well enough to answer. Do not duplicate the same evidence through another provider.
+- Shell fallback is disabled in this benchmark mode. If context remains incomplete, state the unresolved slot as a risk, missing_coverage, unknown, or next_question inside the requested JSON shape.
+- Final output must be a syntactically valid compact single JSON object under 7500 characters. Preserve the requested JSON contract exactly.
+- Preserve the requested JSON contract exactly.
+```
+
+Final output:
+```json
+{"pbi_summary":"Add recall forecast visibility: the Recall page should show due-now and next 3/7/14-day forecast counts so learners can decide whether to continue before clicking load-more. TokenOpt supplied effective repository context; no files were modified.","business_flow":["Learner opens `frontend/src/pages/RecallPage.vue`; the page uses generated `RecallsController.recalling` plus browser `timezoneParam` and stores recall state through `frontend/src/composables/useRecallData.ts`.","Current recalling continues while `toRepeatCount > 0`; progress uses `currentIndex`, previous answered question state, and `treadmillMode` handling.","When `toRepeatCount === 0` and the learner is not reviewing previous answers, the done state currently shows `Load more from next 3 days`, `7 days`, and `14 days` buttons calling `loadMore(3/7/14)`. The new display should add forecast counts there without changing what those buttons load."],"acceptance_criteria":["Recall API response from `backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java` exposes forecast counts for windows `[0,3,7,14]` while preserving existing `dueInDays` and `toRepeat` behavior.","Forecast counts use the same timezone and half-day alignment rules as current loading: `RecallService.getDueMemoryTrackers` delegates through `getMemoryTrackersNeedToRepeat`, applies `dueInDays * 24`, and sets `currentRecallWindowEndAt` via `TimestampOperations.alignByHalfADay`.","Counts are cumulative and monotonic by window: `count[0] <= count[3] <= count[7] <= count[14]`; UI can derive “more” counts as deltas from the cumulative API values.","Counts exclude deleted/removed trackers using the same eligibility filters as existing recall loading, not a separate looser query.","Existing load-more calls for 3/7/14 days remain compatible and continue loading the same recall item sets.","Recall done state/buttons display counts without mutating `toRepeat`, `currentIndex`, previous-answer cursor state, treadmill mode, or current-session progress."],"impacted_files":[{"file":"backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java","impact":"API entrypoint for recall loading; should include forecast data in the existing response path."},{"file":"backend/src/main/java/com/odde/doughnut/controllers/dto/DueMemoryTrackers.java","impact":"Likely DTO to extend with forecast counts while keeping existing fields compatible."},{"file":"backend/src/main/java/com/odde/doughnut/services/RecallService.java","impact":"Owns due-window logic, current half-day end, and existing `getToRecallCount`; best place for a reusable forecast-count method."},{"file":"backend/src/main/java/com/odde/doughnut/services/UserService.java","impact":"Provides `getMemoryTrackersNeedToRepeat`; verify removed/deleted filtering and half-day alignment are reused."},{"file":"backend/src/main/java/com/odde/doughnut/repositories/MemoryTrackerRepository.java","impact":"May need a count-oriented query to avoid materializing trackers for four windows."},{"file":"backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java","impact":"Existing tests cover `recalling(timezone,dueInDays)` including `0` and `3`; add forecast, monotonicity, timezone, and removed/deleted cases."},{"file":"frontend/src/pages/RecallPage.vue","impact":"Done-state UI and `loadMore(3/7/14)` buttons need count display while preserving current behavior."},{"file":"frontend/src/composables/useRecallData.ts","impact":"May hold forecast counts if shared across recall UI; avoid coupling forecast state to `toRepeatCount` session progress."},{"file":"frontend/tests/pages/RecallPage.spec.ts","impact":"Existing Recall page tests mock `RecallsController.recalling` and `useRecallData`; update fixtures/assertions for forecast display and compatibility."},{"file":"packages/generated/doughnut-backend-api","impact":"Generated TypeScript API types/client likely need regeneration after backend DTO/OpenAPI changes."},{"file":"e2e_test/start/pageObjects/recallPage.ts","impact":"E2E page object may need selectors/assertions for count-bearing load-more buttons."},{"file":"e2e_test/step_definitions/recall.ts","impact":"E2E recall steps may need coverage for forecast-count display."}],"symbols":{"backend_entrypoint_api":["`RecallsController.recalling(timezone,dueInDays)` in `backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java`","Generated frontend call `RecallsController.recalling` from `@generated/doughnut-backend-api/sdk.gen`"],"service_domain_logic":["`RecallService.getDueMemoryTrackers(user,currentUTCTimestamp,timeZone,dueInDays)`","`RecallService.getMemoryTrackersNeedToRepeat(...)`","`RecallService.getToRecallCount(...)`","`UserService.getMemoryTrackersNeedToRepeat(...)`","`TimestampOperations.addHoursToTimestamp(...)`","`TimestampOperations.alignByHalfADay(...)`","`TimestampOperations.startOfHalfADay(...)`"],"dto_fields":["`DueMemoryTrackers.dueInDays`","`DueMemoryTrackers.toRepeat`","`DueMemoryTrackers.totalAssimilatedCount`","`DueMemoryTrackers.currentRecallWindowEndAt`"],"frontend_state_or_caller":["`RecallPage.vue` done-state condition `toRepeatCount === 0`","`RecallPage.vue` buttons `loadMore(3)`, `loadMore(7)`, `loadMore(14)`","`useRecallData.toRepeat`","`useRecallData.toRepeatCount`","`useRecallData.currentIndex`","`useRecallData.treadmillMode`","`useRecallData.dueRecallsRefreshNonce`"],"existing_tests":["`backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java`","`frontend/tests/pages/RecallPage.spec.ts`","`e2e_test/step_definitions/recall.ts`"]},"unknowns":["Exact API field name/schema for forecasts is undecided; a map keyed by window or array of `{dueInDays,count}` both need generated type updates.","PBI wording asks for “how many more” while acceptance asks monotonic window counts; safest interpretation is cumulative API counts plus UI deltas for button copy.","Need verify exact removed/deleted tracker representation in `UserService`/repository query before implementation.","Need decide whether forecasts refresh after each answer or only with the recall fetch/done state; current-session progress should remain local either way.","Treadmill mode skips spelling trackers for current quiz selection; confirm whether displayed forecasts should count all recall items, including spelling, to match existing load-more behavior."],"risks":["Timezone and half-day edge cases can drift if forecast code uses a new date calculation instead of the existing `RecallService`/`TimestampOperations` path.","Repeatedly materializing full tracker lists for four forecast windows may be slow for learners with many trackers; prefer a count query if the existing repository supports it safely.","Displaying cumulative counts directly on buttons may conflict with the learner’s “more would be loaded” expectation; derive and clamp deltas for UI labels.","Adding forecast fields as required fields can break generated frontend/CLI fixtures; make response evolution compatible and regenerate types/tests together.","Forecast state must not drive `toRepeatCount`, otherwise treadmill mode and current-session progress can regress."],"next_steps":{"implementation":["Extend `DueMemoryTrackers` with forecast counts for windows `[0,3,7,14]`.","Add `RecallService` forecast method that reuses current due-window/timezone/half-day eligibility logic and enforces monotonic cumulative counts.","Populate forecasts in `RecallsController.recalling` for every request, while preserving requested `dueInDays` list loading.","Update generated API types and frontend fixtures.","Update `RecallPage.vue` done-state buttons to show due-now and delta counts while keeping `loadMore(3/7/14)` unchanged.","Add backend, frontend, and focused E2E coverage for counts, zero-count windows, compatibility, and treadmill/current-session behavior."],"validation_commands":["`pnpm backend:test_only -- --tests com.odde.doughnut.controllers.RecallsControllerTests`","`pnpm backend:generateOpenAPIDocs`","`pnpm generateTypeScript`","`pnpm frontend:test -- RecallPage.spec.ts`","`pnpm frontend:lint`"]}}
+```
+
+Idea checks: 8/8 (1.000)
+
+Critical misses: symbol:loadCurrentDueRecalls, symbol:setCurrentRecallWindowEndAt
+
+### doughnut / doughnut-recall-wrong-answer-bug-trace
+
+Class: bug_trace
+
+Prompt:
+```
+Daily task: bug trace. A regression report says that after a learner answers a recall prompt incorrectly, the next retry is no longer scheduled about 12 hours later. Trace the likely code path and produce a fix handoff. Return valid compact JSON only with keys: summary, reproduction_path, root_cause_hypotheses, files, symbols, tests_to_run, fix_plan, risks. Do not modify files.
+```
+
+Expected evidence:
+```json
+{
+  "files": [
+    "backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java",
+    "backend/src/main/java/com/odde/doughnut/services/MemoryTrackerService.java",
+    "backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java",
+    "backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java",
+    "backend/src/test/java/com/odde/doughnut/services/MemoryTrackerServiceTest.java"
+  ],
+  "symbols": [
+    "recallFailed",
+    "markAsRecalled",
+    "answerQuiz",
+    "answerSpelling",
+    "TimestampOperations.addHoursToTimestamp"
+  ],
+  "terms": [
+    "12",
+    "nextRecallAt",
+    "incorrect",
+    "thinkingTimeMs",
+    "spelling"
+  ]
+}
+```
+
+Quality rubric:
+- Starts from the bug symptom and traces controller/service/entity paths.
+- Identifies wrong-answer retry scheduling as distinct from success scheduling.
+- Names focused regression tests and risks.
+
+Mode metrics:
+
+| Repo | Task | Mode | Acq | Contract | Contract ok | Double | Correct | Quality | Idea | Critical | JSON | Input tok | Cached tok | Delta vs baseline | Output tok | Reason tok | Raw tok | Fresh tok | Q/10k fresh | Tool | MCP | Shell | Tool out chars | Duration ms |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| doughnut | doughnut-recall-wrong-answer-bug-trace | contextgate-natural | ask_or_bypass | artifact_sufficiency | no | no | yes | 0.813 | 0.875 | 3 | yes | 68321 | 21632 |  | 4446 | 2872 | 75639 | 54007 | 0.151 | 1 | 1 | 0 | 90713 | 154263 |
+
+#### Output: contextgate-natural
+
+Raw log: D:\Personal\Projects\tokenopt\benchmark-results\raw\contextgate-natural-v6-broker-inline-doughnut-2026-06-16\doughnut-doughnut-recall-wrong-answer-bug-trace-contextgate-natural.jsonl
+
+Codex prompt used:
+```
+Daily task: bug trace. A regression report says that after a learner answers a recall prompt incorrectly, the next retry is no longer scheduled about 12 hours later. Trace the likely code path and produce a fix handoff. Return valid compact JSON only with keys: summary, reproduction_path, root_cause_hypotheses, files, symbols, tests_to_run, fix_plan, risks. Do not modify files.
+
+Benchmark constraints:
+- Preserve the requested output format exactly.
+- Cite repository-relative files when the task asks for citations.
+- Do not modify files.
+- Repository root: D:\Personal\Projects\doughnut
+- Treat this as a natural developer request. Keep the user's prompt, project instructions, and agent instructions authoritative; this benchmark only adds a bounded evidence contract and output constraints.
+- Evidence slots to satisfy before final answer: source_files, symbols, existing_tests, risks, backend_entrypoint_api, service_domain_logic, frontend_state_or_caller_when_present, business_invariants_or_bug_symptom, validation_commands, entrypoint_or_owner, flow.
+- Repository root for any context broker or bounded source tool that asks for cwd/root: D:\Personal\Projects\doughnut.
+- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=investigate, required_slots=["source_files","symbols","existing_tests","risks","backend_entrypoint_api","service_domain_logic","frontend_state_or_caller_when_present","business_invariants_or_bug_symptom","validation_commands","entrypoint_or_owner","flow"], budget_tokens around 1800, and quality_rubric=["Starts from the bug symptom and traces controller/service/entity paths.","Identifies wrong-answer retry scheduling as distinct from success scheduling.","Names focused regression tests and risks."].
+- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.
+- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.
+- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.
+- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.
+- Stop acquiring context once the required slots are covered well enough to answer. Do not duplicate the same evidence through another provider.
+- Shell fallback is disabled in this benchmark mode. If context remains incomplete, state the unresolved slot as a risk, missing_coverage, unknown, or next_question inside the requested JSON shape.
+- Final output must be a syntactically valid compact single JSON object under 7500 characters. Preserve the requested JSON contract exactly.
+- Preserve the requested JSON contract exactly.
+```
+
+Final output:
+```json
+{"summary":"Likely backend regression: the domain invariant for a wrong recall is still encoded in MemoryTracker.recallFailed, which sets nextRecallAt to currentUTCTimestamp + 12 hours, but an answer path may no longer reach that branch or may overwrite it. Trace starts at POST /api/recall-prompts/{recallPrompt}/answer or /answer-spelling, then scheduling is read back by GET /api/recalls/recalling.","reproduction_path":["Create or find a due MemoryTracker returned by GET /api/recalls/recalling from backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java:39.","Answer its RecallPrompt incorrectly through POST /api/recall-prompts/{recallPrompt}/answer in backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java:63 or spelling via /answer-spelling at line 76.","Reload due recalls around 12 hours later using GET /api/recalls/recalling; RecallService filters due trackers through getDueMemoryTrackers in backend/src/main/java/com/odde/doughnut/services/RecallService.java:47.","Expected: memory_tracker.next_recall_at is current answer time + about 12 hours. Regression symptom: retry is absent or scheduled by the success interval instead."],"root_cause_hypotheses":[{"confidence":"high","hypothesis":"Incorrect answers are being passed as successful=true to MemoryTracker.markAsRecalled, causing recalledSuccessfully to run instead of recallFailed.","evidence":["backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java:115 branches solely on successful.","backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java:100 sets failed retries to currentUTCTimestamp + 12 hours.","backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java:105 schedules successful answers through ForgettingCurve instead."]},{"confidence":"medium","hypothesis":"The answer service still records the answer but bypasses MemoryTracker.markAsRecalled or overwrites nextRecallAt after recallFailed.","evidence":["backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java:63 delegates quiz answers to RecallQuestionService.answerQuestion.","backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java:76 delegates spelling answers to MemoryTrackerService.answerSpelling."]},{"confidence":"low","hypothesis":"Frontend local state hides the retry, but backend nextRecallAt is the source of truth, so this is only likely if the report is about immediate UI state rather than persisted scheduling.","evidence":["frontend/src/pages/RecallPage.vue:30 renders Quiz from toRepeat.","frontend/src/composables/useRecallData.ts:5 stores toRepeat client-side.","backend/src/main/java/com/odde/doughnut/services/RecallService.java:47 rebuilds due recalls from backend state."]}],"files":["backend/src/main/java/com/odde/doughnut/controllers/RecallPromptController.java","backend/src/main/java/com/odde/doughnut/controllers/RecallsController.java","backend/src/main/java/com/odde/doughnut/services/RecallService.java","backend/src/main/java/com/odde/doughnut/entities/MemoryTracker.java","backend/src/main/java/com/odde/doughnut/entities/ForgettingCurve.java","frontend/src/pages/RecallPage.vue","frontend/src/composables/useRecallData.ts","backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java","backend/src/test/java/com/odde/doughnut/controllers/RecallsControllerTests.java","backend/src/test/java/com/odde/doughnut/services/RecallServiceWithSpacedRepetitionAlgorithmTest.java","frontend/tests/pages/RecallPage.spec.ts"],"symbols":["RecallPromptController.answerQuiz","RecallPromptController.answerSpelling","RecallsController.recalling","RecallService.getDueMemoryTrackers","MemoryTracker.markAsRecalled","MemoryTracker.recallFailed","MemoryTracker.recalledSuccessfully","MemoryTracker.calculateNextRecallAt","ForgettingCurve.failed","ForgettingCurve.succeeded","RecallPage","useRecallData"],"tests_to_run":["Add or update backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java: incorrect MCQ answer through answerQuiz sets MemoryTracker.nextRecallAt to now + 12 hours and does not use success scheduling.","Add or update backend/src/test/java/com/odde/doughnut/controllers/RecallPromptControllerTests.java: incorrect spelling answer through answerSpelling follows the same 12-hour retry invariant if spelling uses the same scheduling rule.","Run focused backend tests for RecallPromptControllerTests, RecallsControllerTests, and RecallServiceWithSpacedRepetitionAlgorithmTest with the repo backend test command.","Run frontend/tests/pages/RecallPage.spec.ts only if UI behavior around removing answered items or refreshing due recalls is touched."],"fix_plan":["Inspect RecallQuestionService.answerQuestion and MemoryTrackerService.answerSpelling call sites for how correctness is computed and how MemoryTracker.markAsRecalled is invoked.","Preserve MemoryTracker.recallFailed as the canonical failure scheduler: failed answer must call markAsRecalled(currentUTCTimestamp,false,thinkingTimeMs) or recallFailed(currentUTCTimestamp), leaving nextRecallAt at current + 12 hours.","If a later call recomputes nextRecallAt with calculateNextRecallAt or recalledSuccessfully, guard it so it only runs for successful answers.","Add regression tests asserting incorrect answers schedule exactly from TestabilitySettings currentUTCTimestamp + 12 hours, distinct from successful-answer scheduling.","Verify GET /api/recalls/recalling returns the tracker when the test clock advances to the retry time/window."],"risks":["The broker-provided evidence did not include source slices for RecallQuestionService.answerQuestion or MemoryTrackerService.answerSpelling, so the exact bad assignment or overwrite remains a handoff target rather than proven line-level root cause.","Half-day recall windows in RecallService.currentRecallWindowEndAt may affect visibility timing around boundaries; test with a fixed timezone and controlled TestabilitySettings timestamp.","ForgettingCurve.failed clamps the index at the default minimum, so tests should assert scheduling first and curve changes only where fixture state makes that meaningful.","Do not change success scheduling in MemoryTracker.recalledSuccessfully while fixing failure scheduling."]}
+```
+
+Idea checks: 7/8 (0.875)
+
+Critical misses: file:backend/src/main/java/com/odde/doughnut/services/MemoryTrackerService.java, file:backend/src/test/java/com/odde/doughnut/services/MemoryTrackerServiceTest.java, symbol:TimestampOperations.addHoursToTimestamp

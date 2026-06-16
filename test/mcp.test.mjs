@@ -97,15 +97,44 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
     JSON.stringify({ name: "contextgate-fixture", scripts: { test: "vitest run" } }, null, 2)
   );
   fs.writeFileSync(path.join(repo, "README.md"), "Orders business covers authorization, settlement, and refunds.\n");
+  fs.mkdirSync(path.join(repo, "src", "orders"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "test", "orders"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "src", "orders", "OrdersController.ts"),
+    [
+      "import { OrderService } from './OrderService';",
+      "export class OrdersController {",
+      "  constructor(private service: OrderService) {}",
+      "  authorize(orderId: string) {",
+      "    return this.service.authorizePayment(orderId);",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "src", "orders", "OrderService.ts"),
+    [
+      "export class OrderService {",
+      "  authorizePayment(orderId: string): boolean {",
+      "    if (!orderId) throw new Error('missing order');",
+      "    return orderId.startsWith('ready-');",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "test", "orders", "OrderService.test.ts"),
+    "import { OrderService } from '../../src/orders/OrderService';\nit('authorizes ready orders', () => expect(new OrderService().authorizePayment('ready-1')).toBe(true));\n"
+  );
 
   await withTokenOptMcp(
     async (client) => {
       const packet = await client.callTool({
         name: "contextgate_get_context",
         arguments: {
-          task: "Study the orders business flow and list concepts, files, risks, and tests.",
+          task: "Study the OrderService orders business flow and list concepts, files, risks, and tests.",
           task_type: "research_business",
-          required_slots: ["source_files", "symbols", "existing_tests", "risks"],
+          required_slots: ["source_files", "backend_entrypoint_api", "service_domain_logic", "existing_tests", "risks"],
           cwd: repo,
           include_structured_packet: true
         }
@@ -114,8 +143,13 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
       assert.equal(packet.isError ?? false, false);
       assert.match(packet.content[0].text, /ContextGate evidence packet compact/);
       assert.match(packet.content[0].text, /coverage contract/);
+      assert.match(packet.content[0].text, /ContextGate broker inline source evidence/);
+      assert.match(packet.content[0].text, /src\/orders\/OrderService\.ts/);
+      assert.match(packet.content[0].text, /test\/orders\/OrderService\.test\.ts/);
       assert.equal(packet.structuredContent.broker, "contextgate");
-      assert.deepEqual(packet.structuredContent.requiredSlots, ["source_files", "symbols", "existing_tests", "risks"]);
+      assert.deepEqual(packet.structuredContent.requiredSlots, ["source_files", "backend_entrypoint_api", "service_domain_logic", "existing_tests", "risks"]);
+      assert.equal(packet.structuredContent.effectiveAnswerable, true);
+      assert.equal(packet.structuredContent.inlineEvidence.coverage.feature_test_grounding, "covered");
       assert.equal(packet.structuredContent.naturalToolPolicy, "coverage-contract");
     },
     { cwd: repo }
