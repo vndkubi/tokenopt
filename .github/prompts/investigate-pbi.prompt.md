@@ -7,11 +7,12 @@ agent: agent
 
 Investigate the provided PBI before planning edits. Return compact JSON.
 
-TokenOpt/CodeGraph routing:
+Natural evidence routing:
 - If no PBI, requirement body, ticket URL, or acceptance criteria is provided, ask for the artifact and do not inspect the repo.
-- Use TokenOpt to extract business slots: user value, acceptance criteria, compatibility constraints, unknowns, risks, and validation.
-- Use CodeGraph to ground impacted files, symbols, tests, and current behavior when an index is available.
-- In TokenOpt-only mode, stop after one packet plus exact allowed followups.
-- In CodeGraph-only mode, use a research/change pack and mark business assumptions that are not in the PBI.
+- Treat pasted Given/When/Then, How, Why, acceptance criteria, Jira text, Confluence text, or direct attachment summaries as valid requirement evidence.
+- Extract business slots first: user value, Given/When/Then, How, Why, acceptance criteria, compatibility constraints, unknowns, risks, and validation.
+- Use compact broker or graph/source evidence only for missing repo slots: impacted files, symbols, existing tests, current behavior, and validation commands.
+- If a file, symbol, endpoint, field, or diff is named, go exact first instead of broad context.
+- Stop when the requested evidence slots are covered; do not duplicate the same evidence through another provider.
 
-JSON keys: status, pbi_summary, business_flow, acceptance_criteria, current_behavior, impacted_files, symbols, tests, unknowns, risks, next_steps.
+JSON keys: status, pbi_summary, given_when_then, how, why, current_behavior, impacted_files, symbols, tests, unknowns, risks, next_steps.

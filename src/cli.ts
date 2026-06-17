@@ -84,7 +84,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         mcpConfigPath: result.mcpConfigPath,
         installAgents: options.installAgents,
         installPrompts: options.installPrompts,
-        includeRunCommand: options.includeRunCommand
+        includeRunCommand: options.includeRunCommand,
+        includeCodeGraph: options.includeCodeGraph,
+        codeGraphConfigured: result.codeGraphConfigured,
+        codeGraphCliPath: result.codeGraphCliPath
       }
     });
     process.stdout.write(formatCopilotSetupResult(result));
@@ -292,12 +295,18 @@ function parseCopilotSetupOptions(args: string[]): {
   installPrompts: boolean;
   tokenoptCliPath?: string;
   includeRunCommand: boolean;
+  includeCodeGraph?: boolean;
+  codeGraphCliPath?: string;
+  codeGraphRoot?: string;
 } {
   let scope: CopilotSetupScope = "both";
   let installAgents = true;
   let installPrompts = true;
   let includeRunCommand = false;
+  let includeCodeGraph: boolean | undefined;
   let tokenoptCliPath: string | undefined;
+  let codeGraphCliPath: string | undefined;
+  let codeGraphRoot: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -343,10 +352,38 @@ function parseCopilotSetupOptions(args: string[]): {
       includeRunCommand = true;
       continue;
     }
+    if (arg === "--include-codegraph") {
+      includeCodeGraph = true;
+      continue;
+    }
+    if (arg === "--no-codegraph") {
+      includeCodeGraph = false;
+      continue;
+    }
+    if (arg === "--codegraph-cli") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--codegraph-cli requires a path");
+      }
+      codeGraphCliPath = value;
+      includeCodeGraph = true;
+      index += 1;
+      continue;
+    }
+    if (arg === "--codegraph-root") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--codegraph-root requires a path");
+      }
+      codeGraphRoot = value;
+      includeCodeGraph = true;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown Copilot setup option: ${arg}`);
   }
 
-  return { scope, installAgents, installPrompts, tokenoptCliPath, includeRunCommand };
+  return { scope, installAgents, installPrompts, tokenoptCliPath, includeRunCommand, includeCodeGraph, codeGraphCliPath, codeGraphRoot };
 }
 
 function parseMcpMode(args: string[]): "lite" | "full" | "broker" | undefined {
@@ -378,11 +415,14 @@ function formatCopilotSetupResult(result: {
   files: string[];
   warnings: string[];
   nextSteps: string[];
+  codeGraphConfigured?: boolean;
+  codeGraphCliPath?: string;
 }): string {
   const lines = [
     "TokenOpt Copilot setup",
     "",
     `repo: ${result.repoRoot}`,
+    `codegraph: ${result.codeGraphConfigured ? `configured (${result.codeGraphCliPath ?? "detected"})` : "not configured"}`,
     "",
     "files:",
     ...result.files.map((filePath) => `- ${filePath}`),
@@ -402,8 +442,8 @@ function helpText(): string {
 Commands:
   tokenopt init
   tokenopt install codex --scope user|repo
-  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command]
-  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command]
+  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
   tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt exec -- <command...>

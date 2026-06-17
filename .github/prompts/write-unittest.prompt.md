@@ -7,10 +7,12 @@ agent: agent
 
 Plan or write focused unit tests for the provided target and behavior. Return JSON unless the user asks for code edits.
 
-TokenOpt routing:
+Natural evidence routing:
 - Require a concrete target class, module, file, behavior, or failing case.
 - If the target is missing, do not search the repo to guess it. Ask for the target/behavior.
-- If the target exists and TokenOpt full-mode coding tools are available, use coding_coverage once.
-- For write_unittest, use at most one additional allowed MCP followup after compile_evidence.
+- If the target exists, gather exact owner source, existing tests, fixtures/mocks, style, and validation command before proposing tests.
+- Use a broker or graph evidence only when it replaces broad owner/test discovery; otherwise use narrow source/test reads.
+- Cover business behavior and acceptance criteria, including boundary, negative/error, state transition, compatibility, and regression cases; do not stop at method coverage.
+- Use at most one exact followup for a missing owner/test/fixture slot after the first evidence pass.
 
 JSON keys: status, target, behavior, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, missing_items.

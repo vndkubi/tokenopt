@@ -19,6 +19,12 @@ export const TOKENOPT_COPILOT_MCP_TOOLS = [
   "tokenopt_project_facts"
 ] as const;
 
+export const CODEGRAPH_COPILOT_MCP_TOOLS = [
+  "codegraph_context",
+  "codegraph_slice",
+  "codegraph_status"
+] as const;
+
 export interface CopilotSetupOptions {
   repoRoot: string;
   scope?: CopilotSetupScope;
@@ -27,6 +33,9 @@ export interface CopilotSetupOptions {
   copilotConfigPath?: string;
   includeRunCommand?: boolean;
   installPrompts?: boolean;
+  includeCodeGraph?: boolean;
+  codeGraphCliPath?: string;
+  codeGraphRoot?: string;
 }
 
 export interface CopilotSetupResult {
@@ -40,6 +49,8 @@ export interface CopilotSetupResult {
   agentsPath?: string;
   copilotAgentPath?: string;
   promptFiles: string[];
+  codeGraphConfigured: boolean;
+  codeGraphCliPath?: string;
 }
 
 export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupResult {
@@ -74,10 +85,15 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     mcpConfigPath = installCopilotUserMcpConfig({
       configPath: options.copilotConfigPath,
       tokenoptCliPath: options.tokenoptCliPath,
-      includeRunCommand
+      includeRunCommand,
+      repoRoot,
+      includeCodeGraph: options.includeCodeGraph,
+      codeGraphCliPath: options.codeGraphCliPath,
+      codeGraphRoot: options.codeGraphRoot
     });
     files.push(mcpConfigPath);
     nextSteps.push("Open Copilot CLI in the target repo and run /mcp show tokenopt.");
+    nextSteps.push("If CodeGraph was configured, also run /mcp show codegraph.");
   }
 
   if (scope === "repo") {
@@ -97,6 +113,17 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
   if (!includeRunCommand) {
     warnings.push("TokenOpt MCP was installed in lite mode; command execution and project_facts tools are not exposed unless you rerun setup with --include-run-command.");
   }
+  const codeGraphResolution = resolveCodeGraphCli({
+    repoRoot,
+    codeGraphCliPath: options.codeGraphCliPath,
+    codeGraphRoot: options.codeGraphRoot
+  });
+  const codeGraphConfigured = (scope === "user" || scope === "both") && options.includeCodeGraph !== false && Boolean(codeGraphResolution?.cliPath);
+  if ((scope === "user" || scope === "both") && options.includeCodeGraph === true && !codeGraphResolution?.cliPath) {
+    warnings.push("CodeGraph MCP was requested but no CLI was found. Set TOKENOPT_CODEGRAPH_ROOT, TOKENOPT_CODEGRAPH_CLI, --codegraph-root, or --codegraph-cli.");
+  } else if ((scope === "user" || scope === "both") && !codeGraphConfigured) {
+    warnings.push("CodeGraph MCP was not configured. Natural prompts can still use TokenOpt, but graph/source evidence requires --include-codegraph plus a CodeGraph CLI/root.");
+  }
   warnings.push("Copilot hooks were not installed. TokenOpt does not ship a Copilot hook adapter yet; use MCP + instructions for Copilot today.");
 
   return {
@@ -109,7 +136,9 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     copilotPathInstructionsPath,
     agentsPath,
     copilotAgentPath,
-    promptFiles
+    promptFiles,
+    codeGraphConfigured,
+    codeGraphCliPath: codeGraphResolution?.cliPath
   };
 }
 
@@ -117,6 +146,10 @@ export function installCopilotUserMcpConfig(options: {
   configPath?: string;
   tokenoptCliPath?: string;
   includeRunCommand?: boolean;
+  repoRoot?: string;
+  includeCodeGraph?: boolean;
+  codeGraphCliPath?: string;
+  codeGraphRoot?: string;
 } = {}): string {
   const configPath = options.configPath ?? getCopilotMcpConfigPath();
   const tokenoptCliPath = normalizeJsonPath(path.resolve(options.tokenoptCliPath ?? getDefaultTokenOptCliPath()));
@@ -134,6 +167,33 @@ export function installCopilotUserMcpConfig(options: {
     tools
   };
 
+  if (options.includeCodeGraph !== false) {
+    const codeGraph = resolveCodeGraphCli({
+      repoRoot: options.repoRoot ?? process.cwd(),
+      codeGraphCliPath: options.codeGraphCliPath,
+      codeGraphRoot: options.codeGraphRoot
+    });
+    if (codeGraph?.cliPath) {
+      const repoRoot = normalizeJsonPath(path.resolve(options.repoRoot ?? process.cwd()));
+      mcpServers.codegraph = {
+        type: "local",
+        command: "node",
+        args: [
+          normalizeJsonPath(codeGraph.cliPath),
+          "mcp",
+          "--root",
+          repoRoot,
+          "--workspace-key",
+          repoRoot,
+          "--mcp-profile",
+          "client"
+        ],
+        env: {},
+        tools: [...CODEGRAPH_COPILOT_MCP_TOOLS]
+      };
+    }
+  }
+
   const next = {
     ...config,
     mcpServers
@@ -150,6 +210,34 @@ export function getCopilotMcpConfigPath(homeDir = os.homedir()): string {
 
 export function getDefaultTokenOptCliPath(): string {
   return path.join(path.dirname(fileURLToPath(import.meta.url)), "cli.js");
+}
+
+export function resolveCodeGraphCli(options: {
+  repoRoot: string;
+  codeGraphCliPath?: string;
+  codeGraphRoot?: string;
+  env?: NodeJS.ProcessEnv;
+}): { cliPath: string; source: "option-cli" | "option-root" | "env-cli" | "env-root" | "sibling" } | undefined {
+  const env = options.env ?? process.env;
+  const explicitCli = options.codeGraphCliPath ?? env.TOKENOPT_CODEGRAPH_CLI;
+  if (explicitCli) {
+    const cliPath = path.resolve(explicitCli);
+    return fs.existsSync(cliPath) ? { cliPath, source: options.codeGraphCliPath ? "option-cli" : "env-cli" } : undefined;
+  }
+
+  const explicitRoot = options.codeGraphRoot ?? env.TOKENOPT_CODEGRAPH_ROOT;
+  if (explicitRoot) {
+    const cliPath = path.resolve(explicitRoot, "dist", "cli.js");
+    return fs.existsSync(cliPath) ? { cliPath, source: options.codeGraphRoot ? "option-root" : "env-root" } : undefined;
+  }
+
+  const repoRoot = path.resolve(options.repoRoot);
+  const candidates = [
+    path.resolve(repoRoot, "..", "code-graph", "dist", "cli.js"),
+    path.resolve(repoRoot, "..", "codegraph", "dist", "cli.js")
+  ];
+  const cliPath = candidates.find((candidate) => fs.existsSync(candidate));
+  return cliPath ? { cliPath, source: "sibling" } : undefined;
 }
 
 export function buildCopilotCloudMcpConfig(includeRunCommand = false): string {

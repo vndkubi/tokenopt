@@ -73,6 +73,13 @@ export function routeTask(input: RouteTaskInput): RouteDecision {
     ], "tracebug_direct");
   }
 
+  if (isTaskTaxonomyResearchPrompt(prompt)) {
+    return decision("broad_flow", requestedTaskType ?? "research_business", "explore", "compile", [
+      "Prompt asks for a taxonomy of supported developer workflows; gather broad repository context instead of treating listed task classes as active task artifacts.",
+      ...signals
+    ], "broad_compile");
+  }
+
   if (isReviewPrompt(prompt)) {
     return decision("review_diff", "review_diff", "review", "compile", [
       "Prompt is review/diff oriented; use review-shaped evidence and avoid repo-wide exploration.",
@@ -223,11 +230,14 @@ function getMissingArtifactReason(task: string, prompt: string, signals: string[
       ? "Prompt asks for code review and includes Jira/Confluence requirement evidence, but no concrete code review artifact was provided. Read the requirement via MCP when available, but ask for a diff, PR, branch pair, changed file list, file path, symbol, or risky surface before reviewing code."
       : "Prompt asks for review but no concrete diff, changed file list, PR, branch pair, symbol, or risky surface was provided.";
   }
+  if (isPromoteReviewMemoryPrompt(prompt)) {
+    return "Prompt asks to promote review memory but no completed-task summary, transcript, diff, or review evidence was provided.";
+  }
   if (hasConcreteArtifact(task, signals)) {
     return undefined;
   }
-  if (isPromoteReviewMemoryPrompt(prompt)) {
-    return "Prompt asks to promote review memory but no completed-task summary, transcript, diff, or review evidence was provided.";
+  if (isTaskTaxonomyResearchPrompt(prompt)) {
+    return undefined;
   }
   if (isUnitTestPlanningPrompt(prompt)) {
     return "Prompt asks for a unit-test plan but no target class, module, file, behavior, or failing case was provided.";
@@ -250,6 +260,11 @@ function hasCodeReviewArtifact(task: string, signals: string[]): boolean {
     /\b(?:changed files?|diff|risky surface)\s*:\s*\S.{20,}/is.test(task) ||
     /\b(?:base|target|develop|main|master|release|branch)\s+[-A-Za-z0-9_./]+\s+(?:to|into|<-|<--|from|vs|against)\s+(?:head|source|feature|branch)?\s*[-A-Za-z0-9_./]+/i.test(task) ||
     /\b(?:feature|head|source|branch)\s+[-A-Za-z0-9_./]+\s+(?:to|into|->|-->|against)\s+(?:develop|main|master|release|target|base|branch)\s+[-A-Za-z0-9_./]+/i.test(task);
+}
+
+function isTaskTaxonomyResearchPrompt(prompt: string): boolean {
+  return /\b(?:research|analyze|explain|summarize)\b[\s\S]{0,120}\b(?:developer tasks|task classes|workflow classes|workflows this repo|tasks this repo)\b/i.test(prompt) ||
+    /\bwhat developer tasks\b/i.test(prompt);
 }
 
 function hasConcreteArtifact(task: string, signals: string[]): boolean {
@@ -369,7 +384,7 @@ function isSecurityAuditPrompt(prompt: string): boolean {
 }
 
 function isPromoteReviewMemoryPrompt(prompt: string): boolean {
-  return /\b(promote|promotion)\b/i.test(prompt) && /\b(review memory|memory)\b/i.test(prompt);
+  return /\b(promote|promoted|promoting|promotion)\b/i.test(prompt) && /\b(review memory|memory)\b/i.test(prompt);
 }
 
 function isUnitTestPlanningPrompt(prompt: string): boolean {
@@ -462,7 +477,12 @@ function collectConcreteBehaviorAnchors(task: string): string[] {
 }
 
 function isReviewPrompt(prompt: string): boolean {
-  return /\b(review|pull request|pr|diff|changed files?|code review)\b/i.test(prompt) || /^diff --git\b/m.test(prompt);
+  return /^diff --git\b/m.test(prompt) ||
+    /\b(?:code review|review-code|pull request|merge request|pr|mr|changed files?|risky surface)\b/i.test(prompt) ||
+    /\breview\s+(?:this|the|a|an|my|our|pr|mr|pull request|merge request|diff|patch|change|changes|changed|code|commit|branch|file|files)\b/i.test(prompt) ||
+    /\b(?:perform|do|run)\s+(?:a\s+)?(?:security-focused\s+)?review\b/i.test(prompt) ||
+    /\b(?:diff|patch)\b[\s\S]{0,80}\b(?:review|findings?|risky|changed files?)\b/i.test(prompt) ||
+    /\b(?:review|findings?)\b[\s\S]{0,80}\b(?:diff|patch)\b/i.test(prompt);
 }
 
 function inferBroadTaskType(task: string): EvidenceTaskType {

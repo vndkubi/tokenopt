@@ -135,6 +135,8 @@ test("tokenopt codegraph natural prompt stays route-aware without fixed tool scr
   assert.match(prompt, /Evidence intent for context acquisition only/);
   assert.match(prompt, /Do not pass output-schema boilerplate/);
   assert.match(prompt, /Required evidence slots/);
+  assert.match(prompt, /do not answer from the prompt text alone/);
+  assert.match(prompt, /one compact bounded repository\/context evidence pass/);
   assert.match(prompt, /Choose the next action by the missing evidence slot/);
   assert.match(prompt, /Hard budget: use at most 3 context\/source tool calls total/);
   assert.match(prompt, /no line range, symbol, or bounded slice hint/);

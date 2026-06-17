@@ -132,16 +132,35 @@ Running install again updates the existing block instead of appending duplicates
 
 Copilot may ignore MCP unless the relevant instruction/custom-agent files are loaded for the current surface. After setup, verify Copilot references `.github/copilot-instructions.md` or `.github/instructions/tokenopt.instructions.md`, and verify the custom agent appears in Copilot CLI with `/agent` when that surface supports project custom agents.
 
+Daily prompts should stay natural. You should not have to write "use TokenOpt" or "use CodeGraph" in normal prompts such as "review this PR", "investigate this PBI", or "write tests for this behavior". The installed instruction layer maps those prompts to the evidence route.
+
+If you also want CodeGraph evidence in Copilot, configure it during setup:
+
+```powershell
+$env:TOKENOPT_CODEGRAPH_ROOT='D:\Personal\Projects\code-graph'
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both --include-codegraph
+```
+
+or pass it explicitly:
+
+```powershell
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both --include-codegraph --codegraph-root D:\Personal\Projects\code-graph
+```
+
 Expected agent flow:
 
 ```text
 1. Keep the user's natural prompt and project/agent instructions authoritative.
-2. Use contextgate_get_context only when it can replace broad exploration.
-3. Pass the natural task, inferred task_type, cwd, required_slots, budget_tokens, and quality_rubric.
-4. If answerable=true and recommended_next_action=answer_now, answer from the packet.
-5. If slots are missing, refill only those named slots; avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
-6. Redundant MCP exploration after answerable=true is gated.
-7. With Codex hooks trusted, shell grep/search after a packet is denied when ContextGate has already provided answer-now guidance or exact followups.
+2. Classify the evidence need: broad/unknown owner, exact file/symbol/flow, concrete diff/PR, or missing artifact.
+3. Use contextgate_get_context only when it can replace broad exploration or fill PBI/plan/implement/review evidence slots cheaply.
+4. Pass the natural task, inferred task_type, cwd, required_slots, budget_tokens, and quality_rubric.
+5. For concrete review prompts, use review evidence (`tokenopt_compile_evidence` with `task_type=review_diff`) only when it replaces broad source exploration.
+6. If CodeGraph is configured, use `codegraph_context` for compact graph/source evidence and `codegraph_slice` only for exact missing slices.
+7. If answerable=true and recommended_next_action=answer_now, answer from the packet.
+8. If slots are missing, refill only those named slots; avoid MCP-first plus shell fallback for exact code-flow/class/PBI tasks.
+9. For review, start from net diff/PR/changed files and use Jira, Confluence, or direct attachments only as requirement evidence for business/test coverage.
+10. Redundant MCP exploration after answerable=true is gated.
+11. With Codex hooks trusted, shell grep/search after a packet is denied when ContextGate has already provided answer-now guidance or exact followups.
 ```
 
 For prompts such as "understand checkout flow end-to-end so I can draw Mermaid", use ContextGate only in strict MCP-only mode or when the packet can provide the full evidence path. In normal shell-enabled agent mode, start with narrow native search/read instead of calling ContextGate first and then repeating the same work through shell. For prompts such as "study business and deep dive that business", ContextGate can be useful because docs/inventory often provide enough evidence without shell fallback.
@@ -257,6 +276,13 @@ For a project-level setup:
 ```powershell
 cd <target-repo>
 node <tokenopt-repo>\dist\cli.js setup copilot --scope both
+node <tokenopt-repo>\dist\cli.js doctor copilot
+```
+
+For TokenOpt + CodeGraph in Copilot:
+
+```powershell
+node <tokenopt-repo>\dist\cli.js setup copilot --scope both --include-codegraph --codegraph-root D:\Personal\Projects\code-graph
 node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 

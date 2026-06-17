@@ -2,6 +2,7 @@ node_modules/
 dist/
 coverage/
 benchmark-results/
+.codegraph/
 *.tgz
 .tokenopt/artifacts/
 .tokenopt/*.jsonl

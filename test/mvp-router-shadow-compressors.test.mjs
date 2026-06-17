@@ -14,6 +14,9 @@ import { routeTask } from "../dist/router.js";
 test("router classifies review, debug, refactor, exact, and small-repo bypass tasks", () => {
   assert.equal(routeTask({ task: "Review this PR diff for changed files" }).taskClass, "needs_input_bypass");
   assert.equal(routeTask({ task: "Review this diff:\ndiff --git a/src/orders/OrderService.ts b/src/orders/OrderService.ts" }).taskClass, "review_diff");
+  assert.equal(routeTask({ task: "Research developer tasks this repo supports, including research, investigate code, investigate PBI, implement, unit-test, review, and Spec Kit workflows." }).taskClass, "broad_flow");
+  assert.equal(routeTask({ task: "Investigate this PBI: Given a developer asks naturally, When the task is broad, Then use compact context and bounded followups." }).taskClass, "broad_flow");
+  assert.equal(routeTask({ task: "Investigate this PBI: Given a developer asks naturally, When the task is broad, Then use compact context first; When the task names a file/symbol/diff, Then go exact first." }).taskClass, "broad_flow");
   assert.equal(routeTask({ task: "/review-code branch feature/orders-fix to branch develop/main. Review net diff in two phases." }).taskClass, "review_diff");
   const branchReviewWithRequirements = routeTask({ task: "/review-code branch feature/orders-fix to branch develop/main with Jira ABC-123 and Confluence page https://example.atlassian.net/wiki/spaces/ABC/pages/123/Spec" });
   assert.equal(branchReviewWithRequirements.taskClass, "review_diff");

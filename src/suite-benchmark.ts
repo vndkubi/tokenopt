@@ -1263,6 +1263,7 @@ function naturalTokenOptCodeGraphPlanLines(
     "- Do not pass output-schema boilerplate, JSON key names, benchmark harness text, or generic words like return/valid/compact as retrieval intent.",
     `- Required evidence slots before final answer: ${requiredSlots.join(", ")}.`,
     `- Quality rubric to keep in mind: ${qualityRubricJson}.`,
+    ...naturalRepoEvidenceNeedLines(task, taskType),
     `- For broad or unknown-owner tasks, a compact context packet around ${packetTokens} tokens is usually the cheapest first step when available.`,
     explicitTarget
       ? "- Because the task already names concrete targets, prefer exact bounded source or graph lookups before broad context gathering."
@@ -1333,7 +1334,11 @@ function naturalEvidenceSlotsForTask(task: Pick<SuiteTask, "class" | "prompt">, 
     slots.add("existing_tests");
   }
   if (taskType === "review_diff") {
-    return ["changed_files", "changed_symbols", "findings", "tests_or_validation", "compatibility_risks"];
+    const reviewSlots = new Set(["changed_files", "changed_symbols", "findings", "business_mapping", "existing_tests", "missing_tests", "compatibility_risks"]);
+    if (/\b(?:jira|confluence|attachment|business|requirement)\b/i.test(idClassPrompt)) {
+      reviewSlots.add("attachment_or_requirement_evidence");
+    }
+    return [...reviewSlots];
   }
   if (taskType === "write_unittest") {
     return ["target_behavior", "owner_source_files", "owner_methods", "existing_test_files", "missing_coverage", "tests_to_add", "validation_commands", "risks"];
@@ -1356,6 +1361,19 @@ function naturalEvidenceSlotsForTask(task: Pick<SuiteTask, "class" | "prompt">, 
     slots.add("validation_commands");
   }
   return [...slots];
+}
+
+function naturalRepoEvidenceNeedLines(task: Pick<SuiteTask, "class" | "prompt">, taskType: EvidenceTaskType): string[] {
+  const text = `${task.class} ${task.prompt}`;
+  const asksForRepoSpecificEvidence = taskType === "review_diff" ||
+    /\b(?:business|coverage|existing tests?|validation|files_to_change|owner_source_files|impacted_files|symbols|phases|evidence_reuse)\b/i.test(text);
+  if (!asksForRepoSpecificEvidence) {
+    return [];
+  }
+  return [
+    "- If the answer needs repo-specific files, symbols, tests, business rules, validation, or changed-code context, do not answer from the prompt text alone.",
+    "- Take one compact bounded repository/context evidence pass scoped to the user request before the final answer; only use a second or third call for one named missing required slot."
+  ];
 }
 
 function naturalTaskWantsTestEvidence(task: Pick<SuiteTask, "class" | "prompt">, taskType: EvidenceTaskType): boolean {

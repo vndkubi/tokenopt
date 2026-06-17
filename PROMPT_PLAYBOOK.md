@@ -16,6 +16,34 @@ Review current diff -> diff/review context first.
 Never repeat the same evidence acquisition with ContextGate + shell/search/read.
 ```
 
+## Natural Lifecycle Pattern
+
+Use normal developer prompts. The user should not need to say "use TokenOpt", "use CodeGraph", or name MCP tools. Agent/repo instructions should classify the evidence need and choose the cheapest route.
+
+```text
+PBI / requirement investigation:
+- If there is no PBI, requirement body, ticket URL, acceptance criteria, or attachment summary, ask for it.
+- If Given/When/Then, How, Why, Jira, Confluence, or attachment text is present, treat it as the business artifact.
+- Use broker/graph evidence only to fill missing repo slots: current behavior, impacted files, symbols, tests, validation, risks.
+
+Plan:
+- If the owner is unknown, use one compact context/evidence pass to find owner files, symbols, existing tests, and constraints.
+- If the prompt already names a file, symbol, endpoint, field, or diff, go exact first.
+- Keep acceptance criteria, compatibility, test coverage, unknowns, and validation explicit.
+
+Implement:
+- Make the smallest compatible change.
+- Add or update unit/regression tests that prove business behavior, not only method coverage.
+- Run the narrowest relevant validation command and report changed files.
+
+Review:
+- Start from the net diff/PR/changed files, not a broad repo scan.
+- For Jira, Confluence, or direct attachments, use them as requirement evidence in the business/test coverage phase.
+- Technical defects and business/test coverage gaps are separate outputs.
+```
+
+Spec Kit prompts stay basic. A prompt such as `/speckit.specify Add a natural TokenOpt + CodeGraph benchmark mode that reduces token burn while preserving output quality` should be enough. The agent should infer whether compact repo evidence is useful during specify, plan, tasks, and implement from evidence slots: domain context, owner files, impacted symbols, tests, validation, risks, and unknowns.
+
 ## Setup Pattern
 
 ContextGate needs two things to route normal prompts reliably:
@@ -234,9 +262,9 @@ Task:
 ### Investigate Unknown Owner
 
 ```text
-Use TokenOpt+CodeGraph as the first evidence route if available.
-TokenOpt is the slot checklist; CodeGraph is the source-of-truth for files, symbols, tests, and flows.
-Do not use shell fallback unless both tools cannot name the missing slot.
+Choose the cheapest evidence route.
+If the owner is unknown, use a compact broker/graph evidence pass if available.
+Use exact followups only for the named missing slot; do not duplicate the same evidence through shell.
 
 Task:
 Investigate <symptom/business area/behavior>.
@@ -271,28 +299,30 @@ entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, 
 ### Investigate PBI
 
 ```text
-Use TokenOpt+CodeGraph first.
 Treat the PBI as the requirement artifact and the repo as evidence. Separate known behavior, unknowns, and proposed scope.
+If the PBI includes Given/When/Then, How, Why, acceptance criteria, Jira/Confluence text, or attachment summaries, treat that as business evidence.
+If ownership is unknown, use a compact broker/graph evidence pass. If files/symbols/endpoints/diffs are named, go exact first.
 
 PBI:
 <paste PBI and acceptance criteria>
 
 Return valid compact JSON only with:
-pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps.
+pbi_summary, given_when_then, how, why, current_behavior, impacted_files, symbols, tests, unknowns, risks, next_steps.
 ```
 
 ### Plan PBI
 
 ```text
-Use TokenOpt+CodeGraph first.
-Use CodeGraph change-pack evidence for owner files, symbols, likely tests, invariants, and validation commands.
+Choose the cheapest evidence route.
+Use broker/graph evidence for unknown-owner plans; use exact source/test evidence for named files, symbols, endpoints, fields, or diffs.
+Plan business behavior coverage before edits: acceptance paths, negative paths, compatibility, tests, and validation commands.
 Do not edit files.
 
 PBI:
 <paste PBI and acceptance criteria>
 
 Return valid compact JSON only with:
-scope, out_of_scope, impacted_files, symbols, implementation_steps, tests, validation_commands, risks.
+scope, out_of_scope, given_when_then, impacted_files, symbols, implementation_steps, business_coverage, tests, validation_commands, risks.
 ```
 
 ### Write Unittest Class
@@ -310,14 +340,14 @@ target_class, behavior, existing_coverage, missing_coverage, test_location, test
 
 ```text
 Prepare an implementation handoff, not code edits.
-Use TokenOpt+CodeGraph if the owner area is not already known.
+Use broker/graph evidence if the owner area is not already known.
 Every implementation step must name a file, symbol, or test surface.
 
 Task:
 <feature/change request>
 
 Return valid compact JSON only with:
-owner_flow, files_to_change, symbols, implementation_steps, test_plan, validation_commands, compatibility_risks, open_questions.
+owner_flow, files_to_change, symbols, implementation_steps, business_coverage, test_plan, validation_commands, compatibility_risks, open_questions.
 ```
 
 ### Implement Code + Unit Tests
@@ -327,7 +357,7 @@ This is an implementation task.
 
 Choose the cheapest evidence path first:
 - Known owner file/module -> native narrow read/search and targeted validation.
-- Unknown owner in a large repo -> CodeGraph change pack, with TokenOpt as coverage checklist if available.
+- Unknown owner in a large repo -> compact broker/graph evidence pass, then exact source/test reads only for one missing slot.
 - Do not accept evidence as complete unless owner symbol, edit surface, related tests, invariants, and validation command are known.
 
 Task:
@@ -335,6 +365,7 @@ Implement <PBI/change>.
 
 Requirements:
 - Smallest scoped code change.
+- Unit/regression tests prove business behavior and acceptance criteria, not only method coverage.
 - Add/update targeted unit tests.
 - Preserve compatibility and existing behavior outside the PBI.
 - Run the narrowest relevant tests.
@@ -388,17 +419,17 @@ status, findings, evidence_used, missing_coverage, non_findings, next_steps.
 
 This table summarizes the route behavior from the 37-prompt real Codex benchmark on the Doughnut repository. Token deltas compare `router-best` against baseline.
 
-| Use case | Route setup | Use TokenOpt first? | Benchmark result | Practical rule |
+| Use case | Route setup | Broker route? | Benchmark result | Practical rule |
 | --- | --- | --- | --- | --- |
-| Broad repo flow, onboarding, context inspection, dependency/build analysis | MCP-first strict, shell off | Yes | `broad_flow`: `-82.3%` total tokens, quality improved from `0.845` to `0.905` | Use `tokenopt_compile_evidence` once, then answer or use exact allowed followups. |
-| Runtime/debug/build failure/root cause | MCP-first strict, shell off | Yes | `debug_runtime`: `-78.1%` total tokens, quality improved from `0.778` to `0.944` | Use TokenOpt first to compress failure evidence and keep followups exact. |
-| Coding implementation/unit-test with concrete target | Full-mode coding coverage | Yes if full-mode tools are available | New coverage layer; benchmark pending | Use `tokenopt_compile_evidence` once, then follow only the capped coding followup if coverage is missing. |
-| PBI/requirement/unit-test/review-memory prompt missing its artifact | Missing-artifact bypass | Yes, as a cheap gate | New guardrail | Return bounded JSON asking for the missing artifact. Do not scan the repo. |
-| Refactor, migration, implementation planning | MCP-first strict, shell off | Usually yes | `refactor_scope`: `-74.4%` total tokens, same average quality `0.938` | Use TokenOpt for impact scope unless the owning file/class is already known. |
-| Unit-test planning or unknown owning test area | MCP-first strict, shell off | Yes for planning | `exact_symbol`: `-61.4%` total tokens, quality improved from `0.750` to `1.000` | For planning, TokenOpt is useful. For writing tests against a known class, use narrow reads directly. |
-| Security audit | Security coverage route | Yes, as a coverage gate | New guardrail | Require concrete scope and security dimensions before findings; otherwise ask for scope or exact followups only. |
-| Review with a concrete diff or patch | Review evidence route | Yes if diff is present | Worktree PR benchmark: `-83.6%` input tokens overall, but recall still needs review-specific safeguards | Give the net diff and read follow-up context from the PR merge/head worktree. TokenOpt can compile review-shaped evidence, but the final answer must still run technical and business coverage checks. |
-| Review without a concrete diff | Missing-artifact bypass | Yes, as a cheap gate | Previously expensive; now guarded | Ask for the diff, changed files, PR, or exact target. Do not use shell fallback. |
+| Broad repo flow, onboarding, context inspection, dependency/build analysis | MCP-first strict, shell off | Usually | `broad_flow`: `-82.3%` total tokens, quality improved from `0.845` to `0.905` | Use one compact broker/evidence pass, then answer or refill one named missing slot. |
+| Runtime/debug/build failure/root cause | Failure packet or exact trace | Usually for long failure output | `debug_runtime`: `-78.1%` total tokens, quality improved from `0.778` to `0.944` | Compress failure evidence and keep followups exact. For already exact stack frames, use narrow reads. |
+| Coding implementation/unit-test with concrete target | Coding coverage or exact source/test evidence | Only when owner/test discovery is broad | New coverage layer; benchmark pending | Require exact owner, dependencies/usages, existing test style, and validation before edits. |
+| PBI/requirement/unit-test/review-memory prompt missing its artifact | Missing-artifact bypass | No repo acquisition | New guardrail | Return bounded JSON asking for the missing artifact. Do not scan the repo. |
+| Refactor, migration, implementation planning | Impact scope | Usually when owner is unknown | `refactor_scope`: `-74.4%` total tokens, same average quality `0.938` | Use broker/graph evidence for impact scope unless the owning file/class is already known. |
+| Unit-test planning or unknown owning test area | Test coverage scope | Usually for planning | `exact_symbol`: `-61.4%` total tokens, quality improved from `0.750` to `1.000` | For planning, broker evidence is useful. For tests against a known class, use narrow reads directly. |
+| Security audit | Security coverage route | Only with concrete scope | New guardrail | Require concrete scope and security dimensions before findings; otherwise ask for scope or exact followups only. |
+| Review with a concrete diff or patch | Review evidence route | Use when it replaces broad source exploration | Worktree PR benchmark: `-83.6%` input tokens overall, but recall still needs review-specific safeguards | Give the net diff, read requirement evidence when available, and run technical plus business/test coverage checks. |
+| Review without a concrete diff | Missing-artifact bypass | No repo acquisition | Previously expensive; now guarded | Ask for the diff, changed files, PR, or exact target. Do not use shell fallback. |
 | Small repo plus exact file/symbol | Bypass | No | Router marks this as negative control | Use native narrow read/search. |
 | Exact class/method/line-level flow trace | Native narrow search/read | Usually no | Hybrid double-spend risk | Use narrow search/read directly unless you need a broad context summary first. |
 | Exact bug trace / tracebug with known target | Native narrow search/read | No | Hybrid double-spend risk | Start from failing test, stack frame, file, symbol, or repro path. Use `tokenopt_failure_packet` only for long failure output. |
@@ -413,19 +444,19 @@ Review this PR/diff in two phases:
 1. Technical review: correctness, regressions, security, performance, reliability, compatibility, and maintainability.
 2. Business/test coverage review: requirement coverage, edge cases, and ISTQB-style test design.
 
-When TokenOpt MCP is available and a concrete review artifact exists, first call `tokenopt_compile_evidence` with `task_type=review_diff`, current `cwd`, budget around 2200, and the full user request plus the complete net unified diff in `task`.
+When a concrete review artifact exists, choose the cheapest review-shaped evidence path that covers changed files, changed symbols, impacted tests, similar logic, and business requirements. Use a broker only when it replaces broad source exploration; otherwise use exact diff/source/test reads or graph evidence.
 Use the net PR diff and PR merge/head worktree for any follow-up reads/searches.
-For branch-pair review, treat target/base branch and feature/head branch as the final PR scope, acquire the merge-base net diff, then call TokenOpt before writing the review.
-If the user attaches or references Jira tickets or Confluence pages, use the available Jira/Confluence MCP tools to read the ticket/page and relevant attachments before business/test coverage review. Do not ask the user to paste the full ticket/page content when a connector can read it. These are requirement artifacts, not a substitute for the code diff/PR/branch pair.
+For branch-pair review, treat target/base branch and feature/head branch as the final PR scope and review the merge-base net diff.
+If the user attaches or references Jira tickets, Confluence pages, or direct attachment summaries, use available connectors or the supplied attachment text before business/test coverage review. Do not ask the user to paste the full ticket/page content when a connector can read it. These are requirement artifacts, not a substitute for the code diff/PR/branch pair.
 If the user provides a review checklist, treat it as a required review rubric and return checklist coverage item by item.
 Do not review per-commit patch output as the final PR state.
 Return compact JSON with:
-technical_review, business_review, istqb_checks, user_checklist, review_status, evidence_contract_pass, acquisition_mode, notes.
+technical_review, business_review, attachment_evidence, istqb_checks, user_checklist, review_status, evidence_contract_pass, acquisition_mode, notes.
 ```
 
 Technical review rules:
 
-- Do not skip TokenOpt silently. If MCP is unavailable, say so in `notes` and continue with native net-diff review.
+- Do not skip required review evidence silently. If a broker or connector is unavailable, say so in `notes` and continue with native net-diff review.
 - Report only introduced, actionable defects.
 - If TokenOpt evidence includes `recall_probe` facts, adjudicate each checked probe as a technical finding, coverage gap, or explicit non-issue with contrary evidence. Promote P1/P2 `technical_finding_candidate=true` probes unless contrary evidence disproves them.
 - Before returning no findings, explicitly check changed invariants, effective config/policy math, parser/encoding boundaries, backwards compatibility, concurrency/async behavior, resource lifecycle, null/error paths, and call replacements.
@@ -435,7 +466,7 @@ Technical review rules:
 Business/test coverage rules:
 
 - Keep coverage gaps separate from technical findings.
-- Ground requirement coverage in Jira/Confluence evidence, including ticket/page attachments when relevant, when the user provides those artifacts. If Jira/Confluence MCP is unavailable or unreadable, say so in `notes` and mark requirement-backed coverage as missing or assumption-based.
+- Ground requirement coverage in Jira/Confluence/direct attachment evidence when the user provides those artifacts. If Jira/Confluence connectors are unavailable or unreadable, say so in `notes` and mark requirement-backed coverage as missing or assumption-based.
 - Apply ISTQB-style dimensions where relevant: boundary values, equivalence partitions, negative/error cases, state transitions, concurrency/async, and compatibility/backward compatibility.
 - Tie every suggested test to the changed behavior and expected business rule.
 - Missing tests are usually `comment`, not `request_changes`, unless the risky behavior is untested enough to make the patch unsafe.
@@ -482,15 +513,15 @@ Use this prefix for most natural tasks:
 ```text
 Choose the cheapest evidence path first.
 
-If this is a broad repo/business/planning task and ContextGate MCP is available, use ContextGate as a cost gate:
-- Call tokenopt_compile_evidence once.
+If this is a broad repo/business/PBI/planning task and a context broker is available:
+- Use one compact evidence pass when it can replace broad exploration.
 - If answerable=true, answer from the packet and do not call shell/search/read again for the same evidence.
-- If answerable=false, use only its allowed TokenOpt followups.
+- If answerable=false, use only one named exact followup for the weakest missing slot.
 
-If this is an implementation, unit-test, fix, or debug task and TokenOpt full-mode coding tools are available:
-- Call tokenopt_compile_evidence once.
-- Treat answerable=true as valid only when coding coverage includes exact target symbol, signature/definition slice, dependencies/usages, test neighbor/style, build/test command, and failure context when relevant.
-- If answerable=false, use only the allowed coding followups.
+If this is an implementation, unit-test, fix, or debug task:
+- Use broker/graph evidence only when owner/test/failure discovery is broad or unknown.
+- Treat evidence as complete only when coding coverage includes exact target symbol, edit surface, dependencies/usages, business behavior, test neighbor/style, build/test command, and failure context when relevant.
+- If owner files/symbols/tests are already named, use narrow source/test evidence directly.
 
 If this is an exact code-flow/class/method/PBI task that needs line-level proof, do not call ContextGate first. Use narrow search/read directly.
 
@@ -516,9 +547,9 @@ Task:
 | Copilot does not call MCP naturally | Yes | `Use the tokenopt-cost-gate agent if available.` |
 | Exact flow/class/method trace | Usually no | Use narrow search/read directly. |
 | Exact bug trace with known target/failing test/stack frame | No | Use native narrow search/read directly; use `tokenopt_failure_packet` only for long failure output. |
-| Unknown-owner implementation, unit-test, fix, or failure task | Yes in full mode | Use ContextGate coding coverage once, then only allowed coding followups. |
+| Unknown-owner implementation, unit-test, fix, or failure task | Optional after setup; mention if the agent does not choose a broker naturally | Use broker/graph evidence for owner/test/failure discovery, then only exact followups. |
 | Known file/module implementation | Usually no | Start from the known file/module and run narrow validation. |
-| Review current diff | Usually no | Use diff context first; use narrow search/read only for unclear impact. |
+| Review current diff | Usually no | Use net diff first; use broker/graph/source evidence only for unclear changed symbols, tests, similar logic, or business requirements. |
 
 ## When To Bypass ContextGate
 
@@ -541,9 +572,9 @@ Use this when the user wants business understanding, glossary, and business flow
 ```text
 Choose the cheapest evidence path first.
 
-This is a broad business/domain understanding task. If TokenOpt MCP is available, use tokenopt_compile_evidence once as a cost gate.
+This is a broad business/domain understanding task. If a context broker is available, use one compact evidence pass as a cost gate.
 If answerable=true, answer from the packet and do not call shell/search/read again.
-If answerable=false, use only allowed TokenOpt followups.
+If answerable=false, use only one named exact followup for the weakest missing slot.
 
 Task:
 Study the <business area> business in this repo.
@@ -562,9 +593,9 @@ Fallback used:
 Use the tokenopt-cost-gate agent if available.
 
 Choose the cheapest evidence path first:
-- Broad business/domain task -> TokenOpt MCP once.
+- Broad business/domain task -> compact broker evidence when available.
 - Exact code-flow task -> narrow search/read directly.
-- Never TokenOpt first plus shell fallback.
+- Never broker first plus shell fallback for the same evidence.
 
 Task:
 Study the <business area> business in this repo.
@@ -629,7 +660,7 @@ Fallback used:
 Choose the cheapest evidence path first.
 
 For this PBI, first decide:
-- Broad requirement/business understanding -> use TokenOpt MCP once.
+- Broad requirement/business understanding or unknown owner -> use one compact broker/graph evidence pass.
 - Exact affected classes/functions/call flow -> use native narrow search/read.
 - Known files/classes -> native narrow search/read.
 - Do not use ContextGate and native exploration for the same evidence unless the first path cannot answer.
@@ -640,11 +671,13 @@ PBI:
 Return:
 1. What the PBI is asking
 2. Why it matters
-3. Impacted business flow
-4. Likely impacted code areas
-5. Risks and unknowns
-6. Acceptance criteria
-7. Recommended next investigation steps
+3. Given/When/Then, How, and Why when present
+4. Impacted business flow
+5. Likely impacted code areas
+6. Existing tests or validation
+7. Risks and unknowns
+8. Acceptance criteria
+9. Recommended next investigation steps
 
 Start with:
 Acquisition path:
@@ -657,8 +690,8 @@ Fallback used:
 ```text
 Choose the cheapest evidence path first.
 
-Use TokenOpt for broad implementation planning if it can summarize repo evidence cheaply.
-Use narrow search/read only if exact owning modules/classes/call flow are needed.
+Use a compact broker/graph evidence pass for broad implementation planning if it can identify owner files, symbols, tests, and validation cheaply.
+Use narrow search/read when exact owning modules/classes/call flow are already named.
 Avoid ContextGate + shell/search/read double-spend.
 
 Task:
@@ -670,7 +703,8 @@ Return:
 - Out of scope
 - Impacted files/modules
 - Step-by-step implementation
-- Test plan
+- Business behavior coverage
+- Unit/regression test plan
 - Risks
 - Rollback/compatibility notes
 ```
@@ -680,7 +714,7 @@ Return:
 ```text
 Choose the cheapest evidence path first.
 
-This is requirement analysis. Use TokenOpt if broad repo/business evidence is enough.
+This is requirement analysis. Use broker evidence if broad repo/business context is needed.
 Use narrow search/read for exact flow or symbol ownership.
 
 Requirement:
@@ -704,15 +738,15 @@ Fallback used:
 
 ### 7. Implement Code + Unit Tests
 
-Use this for actual code changes. Do not force TokenOpt first if the owning file/module is known.
+Use this for actual code changes. Do not force a broker first if the owning file/module is known.
 
 ```text
 This is an implementation task.
 
 Choose the cheapest evidence path first:
-- If the owning area is unknown and TokenOpt full-mode coding tools are available, use ContextGate coding coverage once.
+- If the owning area is unknown, use one compact broker/graph evidence pass to identify owner source, symbols, existing tests, business rules, and validation.
 - If the owning file/module is known, use narrow search/read and targeted validation directly.
-- Do not accept answerable=true for coding work unless the packet covers exact target symbol, definition/signature, dependencies/usages, test neighbor/style, and build/test command.
+- Do not accept implementation evidence as complete unless exact target symbol, edit surface, dependencies/usages, test neighbor/style, business behavior coverage, and build/test command are known.
 - Do not use ContextGate first and then repeat the same evidence acquisition with shell/search/read.
 
 Task:
@@ -721,8 +755,8 @@ Implement this PBI:
 
 Requirements:
 - Implement the smallest safe code change.
-- Add unit tests for all new behavior.
-- Target 100% coverage for new code paths introduced by this PBI.
+- Add unit/regression tests for all new business behavior and acceptance paths.
+- Cover boundary, negative/error, state transition, compatibility, and regression cases when relevant.
 - Follow existing test style.
 - Run only the narrowest relevant tests.
 - Report changed files and validation result.
@@ -738,15 +772,15 @@ Fallback used:
 ```text
 This is a specific test-writing task.
 
-Do not call TokenOpt first if the target class/module is known.
+Do not call a broker first if the target class/module is known.
 Use narrow search/read to find the class, related tests, and existing test style.
 Avoid broad scans and full-suite tests.
 
-If the target class/module is unknown and TokenOpt full-mode coding tools are available, use ContextGate coding coverage once and follow only its allowed coding followups.
+If the target class/module is unknown, use one compact broker/graph evidence pass and follow only one named missing owner/test slot.
 
 Task:
 Write unit tests for <class/module/function>.
-Cover core behavior, edge cases, and error handling.
+Cover core business behavior, acceptance criteria, edge cases, and error handling.
 Follow existing test style.
 Run only the relevant test file or narrow test command.
 
@@ -773,18 +807,23 @@ Do not edit files yet.
 ### 10. Code Review
 
 ```text
-Review the current diff.
+Review the current net diff, PR, changed files, or exact review target.
 
-Do not use TokenOpt first unless the diff lacks basic context.
-Use narrow search/read only if call flow or dependency impact is unclear.
-Focus on correctness, regressions, missing tests, security, and performance risks.
+Choose the cheapest review evidence path:
+- If the diff is enough for a finding, report it directly.
+- If changed symbols, tests, similar logic, or business rules are unclear, use one bounded review/source evidence pass.
+- If Jira, Confluence, or direct attachments are provided, use them as requirement evidence for the business/test coverage phase.
+- If no diff/PR/changed files/exact target is provided, ask for the review artifact and do not scan the repo.
+
+Focus on correctness, regressions, security, performance, compatibility, business requirement coverage, and missing tests.
 
 Return:
 1. Findings first, ordered by severity
 2. File/line evidence
-3. Missing tests
-4. Open questions
-5. Short summary only after findings
+3. Business/test coverage against Jira/Confluence/attachment/checklist evidence
+4. Missing tests
+5. Open questions
+6. Short summary only after findings
 ```
 
 ### 11. Field / Schema Impact
@@ -823,13 +862,12 @@ Cite concrete files and symbols.
 
 ### 13. Build / Daily Handoff
 
-This is a good TokenOpt-first task.
+This is a good broker-first task when the repo shape is broad.
 
 ```text
 Choose the cheapest evidence path first.
 
-This is a broad repo handoff task, so use TokenOpt MCP as a cost gate if available.
-Call tokenopt_compile_evidence once.
+This is a broad repo handoff task, so use one compact broker evidence pass as a cost gate if available.
 If answerable=true, answer from the packet with no extra exploration.
 
 Task:
@@ -928,7 +966,7 @@ Use this when the agent should edit files. Keep TokenOpt as a planning gate only
 ```text
 Choose the cheapest evidence path first.
 
-Use TokenOpt MCP once only if it can identify the owning Spec Kit integration, command, template, tests, or workflow cheaper than broad shell exploration.
+Use broker evidence once only if it can identify the owning Spec Kit integration, command, template, tests, or workflow cheaper than broad shell exploration.
 If TokenOpt returns answerable=true, use the packet as the implementation map and do not repeat exploration with broad shell/search.
 After ownership is known, edit only the narrow files needed.
 
@@ -1015,6 +1053,7 @@ Check:
 
 ```text
 /mcp show tokenopt
+/mcp show codegraph
 /agent
 ```
 
@@ -1027,12 +1066,21 @@ Expected setup files:
 AGENTS.md
 ```
 
-If Copilot still does not call MCP for broad tasks, mention the agent:
+If `codegraph` is missing, configure it without changing the daily prompt:
+
+```powershell
+node dist\cli.js setup copilot --scope both --include-codegraph --codegraph-root D:\Personal\Projects\code-graph
+node dist\cli.js doctor copilot
+```
+
+If Copilot still does not call MCP for broad tasks, mention the agent as a setup/debug hint, not as a permanent daily prompt requirement:
 
 ```text
 Use the tokenopt-cost-gate agent if available.
 Task: <actual broad task>
 ```
+
+For code review, a normal prompt such as `review this PR` is enough when the diff/PR/branch target is visible. The installed review instructions should map it to `tokenopt_compile_evidence` for review slots and `codegraph_context` or exact source reads only for missing changed-code evidence.
 
 ### Token Count Increased
 

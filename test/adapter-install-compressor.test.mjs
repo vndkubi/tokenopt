@@ -108,6 +108,8 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
   const snippet = emitTokenOptInstructions("agents");
   assert.match(snippet, /contextgate_get_context/);
   assert.match(snippet, /answerable=true/);
+  assert.match(snippet, /Daily prompt bridge/);
+  assert.match(snippet, /codegraph_context/);
 
   const agentsPath = installTokenOptInstructions(repo, "agents");
   installTokenOptInstructions(repo, "agents");
@@ -128,6 +130,7 @@ test("instruction emitter and installer produce idempotent MCP guidance", () => 
   assert.equal(copilotAgentPath, path.join(repo, ".github", "agents", "tokenopt-cost-gate.agent.md"));
   assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /name: contextgate-cost-gate/);
   assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /tokenopt\/contextgate_get_context/);
+  assert.match(fs.readFileSync(copilotAgentPath, "utf8"), /codegraph\/codegraph_context/);
 });
 
 test("native prompt pack installs reusable Copilot prompt files", () => {
@@ -152,12 +155,12 @@ test("native prompt pack installs reusable Copilot prompt files", () => {
 
   const writeUnittest = fs.readFileSync(path.join(repo, ".github", "prompts", "write-unittest.prompt.md"), "utf8");
   assert.match(writeUnittest, /name: write-unittest/);
-  assert.match(writeUnittest, /coding_coverage once/);
-  assert.match(writeUnittest, /at most one additional allowed MCP followup/);
+  assert.match(writeUnittest, /Natural evidence routing/);
+  assert.match(writeUnittest, /business behavior and acceptance criteria/);
 
   const writeUnittestClass = fs.readFileSync(path.join(repo, ".github", "prompts", "write-unittest-class.prompt.md"), "utf8");
   assert.match(writeUnittestClass, /name: write-unittest-class/);
-  assert.match(writeUnittestClass, /changeType=test/);
+  assert.match(writeUnittestClass, /exact source\/test evidence/);
 
   const traceBug = fs.readFileSync(path.join(repo, ".github", "prompts", "trace-bug.prompt.md"), "utf8");
   assert.match(traceBug, /name: trace-bug/);
@@ -179,14 +182,15 @@ test("native prompt pack installs reusable Copilot prompt files", () => {
 
   const reviewCode = fs.readFileSync(path.join(repo, ".github", "prompts", "review-code.prompt.md"), "utf8");
   assert.match(reviewCode, /two phases/i);
-  assert.match(reviewCode, /first call `tokenopt_compile_evidence`/);
-  assert.match(reviewCode, /task_type=review_diff/);
+  assert.match(reviewCode, /cheapest review-shaped evidence path/);
+  assert.match(reviewCode, /review broker is available/);
   assert.match(reviewCode, /branch pair/);
-  assert.match(reviewCode, /Jira\/Confluence MCP tools/);
+  assert.match(reviewCode, /Jira tickets or Confluence pages/);
   assert.match(reviewCode, /relevant attachments/);
   assert.match(reviewCode, /Do not ask the user to paste the full ticket\/page content/);
   assert.match(reviewCode, /requirement evidence/);
   assert.match(reviewCode, /PR merge\/head worktree/);
+  assert.match(reviewCode, /attachment_evidence/);
   assert.match(reviewCode, /ISTQB-style/);
   assert.match(reviewCode, /user_checklist/);
   assert.match(reviewCode, /pass, fail, gap, or not_applicable/);
@@ -236,6 +240,7 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.match(copilotPathInstructions, /ContextGate MCP Usage/);
   assert.match(copilotAgent, /name: contextgate-cost-gate/);
   assert.match(copilotAgent, /tokenopt\/contextgate_get_context/);
+  assert.match(copilotAgent, /codegraph\/codegraph_context/);
   assert.match(writeUnittestPrompt, /name: write-unittest/);
   assert.match(traceBugPrompt, /name: trace-bug/);
   assert.equal(result.promptFiles.length, 27);
@@ -250,6 +255,46 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.doesNotMatch(JSON.stringify(config.mcpServers.tokenopt), /\bnpm(?:\.cmd|\.ps1)?\b/i);
   assert.ok(result.warnings.some((warning) => /lite mode/i.test(warning)));
   assert.ok(result.warnings.some((warning) => /hooks were not installed/i.test(warning)));
+});
+
+test("Copilot setup configures CodeGraph MCP when a CodeGraph root is provided", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-copilot-codegraph-"));
+  const codeGraphRoot = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-codegraph-root-"));
+  const copilotConfigPath = path.join(repo, "mcp-config.json");
+  const tokenoptCliPath = path.resolve("dist/cli.js");
+  const codeGraphCli = path.join(codeGraphRoot, "dist", "cli.js");
+  fs.mkdirSync(path.dirname(codeGraphCli), { recursive: true });
+  fs.writeFileSync(codeGraphCli, "", "utf8");
+
+  const result = setupCopilotProject({
+    repoRoot: repo,
+    scope: "user",
+    installAgents: false,
+    installPrompts: false,
+    copilotConfigPath,
+    tokenoptCliPath,
+    includeCodeGraph: true,
+    codeGraphRoot
+  });
+
+  const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf8"));
+  assert.equal(result.codeGraphConfigured, true);
+  assert.equal(config.mcpServers.codegraph.command, "node");
+  assert.deepEqual(config.mcpServers.codegraph.args, [
+    codeGraphCli.replace(/\\/g, "/"),
+    "mcp",
+    "--root",
+    repo.replace(/\\/g, "/"),
+    "--workspace-key",
+    repo.replace(/\\/g, "/"),
+    "--mcp-profile",
+    "client"
+  ]);
+  assert.deepEqual(config.mcpServers.codegraph.tools, [
+    "codegraph_context",
+    "codegraph_slice",
+    "codegraph_status"
+  ]);
 });
 
 test("Copilot cloud MCP example excludes command execution by default", () => {

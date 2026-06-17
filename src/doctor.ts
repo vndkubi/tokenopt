@@ -5,6 +5,7 @@ import crypto from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { getCliEntryPath } from "./codex-adapter.js";
 import {
+  CODEGRAPH_COPILOT_MCP_TOOLS,
   getCopilotMcpConfigPath,
   getDefaultTokenOptCliPath,
   TOKENOPT_COPILOT_LITE_MCP_TOOLS,
@@ -49,7 +50,8 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     check("repo Copilot custom agent", copilotAgentPath, fs.existsSync(copilotAgentPath)),
     check("repo AGENTS.md", agentsPath, fs.existsSync(agentsPath)),
     check("user Copilot MCP config", mcpConfigPath, fs.existsSync(mcpConfigPath)),
-    ...inspectCopilotMcpConfig(mcpConfigPath)
+    ...inspectCopilotMcpConfig(mcpConfigPath),
+    ...inspectCopilotCodeGraphMcpConfig(mcpConfigPath)
   ];
 
   return [
@@ -58,6 +60,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     ...checks.map((item) => `${item.ok ? "[ok]" : "[warn]"} ${item.name}: ${item.detail}`),
     "",
     "Copilot CLI verification: open the target repo and run `/mcp show tokenopt`.",
+    "CodeGraph verification: if graph evidence is expected, run `/mcp show codegraph` too.",
     "GitHub.com cloud agent/code review: configure MCP JSON in Repository -> Settings -> Copilot -> MCP servers; local Windows paths do not work there.",
     "Copilot hooks are not installed by TokenOpt yet; use MCP + instructions for Copilot today."
   ].join("\n");
@@ -107,6 +110,39 @@ function inspectCopilotMcpConfig(filePath: string): Array<{ name: string; detail
       "tokenopt MCP tools",
       missingTools.length === 0 && extraTools.length === 0 ? tools.join(",") : `missing ${missingTools.join(",") || "none"}; extra ${extraTools.join(",") || "none"}`,
       missingTools.length === 0 && extraTools.length === 0
+    )
+  ];
+}
+
+function inspectCopilotCodeGraphMcpConfig(filePath: string): Array<{ name: string; detail: string; ok: boolean }> {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.mcpServers)) {
+    return [];
+  }
+  const server = parsed.mcpServers.codegraph;
+  if (!isRecord(server)) {
+    return [
+      check("codegraph MCP server", "missing; rerun setup with --include-codegraph and --codegraph-root/--codegraph-cli when graph evidence is expected", false)
+    ];
+  }
+  const args = Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [];
+  const tools = Array.isArray(server.tools) ? server.tools.filter((tool): tool is string => typeof tool === "string") : [];
+  const missingTools = CODEGRAPH_COPILOT_MCP_TOOLS.filter((tool) => !tools.includes(tool));
+  return [
+    check("codegraph MCP command", String(server.command ?? "missing"), server.command === "node"),
+    check("codegraph MCP args", args.join(" "), args.some((arg) => /cli\.js$/i.test(arg)) && args.includes("mcp")),
+    check(
+      "codegraph MCP tools",
+      missingTools.length === 0 ? tools.join(",") : `missing ${missingTools.join(",")}`,
+      missingTools.length === 0
     )
   ];
 }

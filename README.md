@@ -104,6 +104,29 @@ Full mode also exposes the regex-lite Coding Coverage Layer. For `implement`, `w
 
 `contextgate_get_context` is the natural entrypoint for agents. It is a broker, not a mandatory extra step: call it when broad repo evidence, business/domain summary, implementation planning, or unit-test planning can replace raw exploration. The user prompt should stay natural; repo/agent instructions carry the tool contract. For exact known-file/class/method edits, narrow direct reads are acceptable. `tokenopt_compile_evidence` remains available for legacy instructions, debugging, and direct benchmark compatibility. If the packet is `answerable=true` and recommends `answer_now`, TokenOpt stores short-lived repo state and gates redundant MCP searches/reads/commands with a compact "answer now" response. Codex hooks can also deny shell grep/search after an answerable packet, or after a non-answerable packet has TokenOpt followups; MCP alone cannot disable a host shell tool.
 
+## Natural Developer Lifecycle
+
+TokenOpt is meant to sit behind normal developer prompts and installed repo/agent instructions. Users should not need to write "use TokenOpt" or "use CodeGraph" in every request.
+
+For Copilot, `tokenopt setup copilot --scope both` installs the instruction/prompt layer and TokenOpt MCP config. To let those same natural prompts use CodeGraph evidence too, run setup with CodeGraph enabled:
+
+```powershell
+node dist\cli.js setup copilot --scope both --include-codegraph --codegraph-root D:\Personal\Projects\code-graph
+node dist\cli.js doctor copilot
+```
+
+Then a daily prompt like "review this PR" should remain a normal review prompt. The installed instructions decide whether the cheapest evidence path is `contextgate_get_context`, `tokenopt_compile_evidence`, `codegraph_context`, exact source reads, or asking for a missing artifact.
+
+| Lifecycle step | Evidence route | Output contract |
+| --- | --- | --- |
+| PBI / requirement investigation | Ask for the artifact if missing. Treat Given/When/Then, How, Why, Jira, Confluence, or attachment text as business evidence. Use a compact broker/graph pass only for missing repo slots. | Summary, Given/When/Then, how, why, current behavior, impacted files/symbols, tests, risks, next steps. |
+| Plan | Broker/graph evidence when owner is unknown; exact source/test evidence when files, symbols, endpoints, fields, or diffs are named. | Scope, out of scope, implementation steps, business behavior coverage, tests, validation, compatibility risks. |
+| Implement | Smallest compatible code change. Use narrow source/test reads when owner is known; broker/graph evidence for unknown owner/test discovery. | Changed files, implementation notes, unit/regression tests that prove business behavior, narrow validation result. |
+| Review PR / diff | Start from the net diff or exact review target. Use Jira/Confluence/direct attachment evidence for business/test coverage when supplied. | Technical findings first, then business/test coverage gaps, attachment evidence, missing tests, notes. |
+| Spec Kit | Keep basic Spec Kit prompts. During specify/plan/tasks/implement, infer whether compact repo evidence is useful from domain, owner files, symbols, tests, validation, risks, and unknowns. | Spec intent, detection decision, phases, evidence reuse, validation, risks. |
+
+The practical rule is evidence-slot driven: broad or unknown-owner work can use ContextGate/CodeGraph to avoid broad exploration; exact file/symbol/diff work should go narrow first. Do not acquire the same evidence through MCP and then again through shell/search/read.
+
 Prompts that require an artifact but do not include one now use `needs_input_bypass`. Examples include PBI planning without PBI text, requirement analysis without a requirement, unit-test planning without a target class/module/behavior, review-memory promotion without completed-task evidence, and review prompts without a concrete diff or scope. `tokenopt_compile_evidence` returns a small `answerable=false` packet with `recommended_next_action=ask_user`, `max_additional_calls=0`, and no repository inventory scan.
 
 Security review uses a separate `security_audit` route instead of generic review fallback. It requires scope plus security-specific coverage for input boundaries, auth/authz, validation/deserialization, secrets/config/dependencies, and tests or guardrails before `answerable=true`. Without that coverage, TokenOpt allows only exact followups or asks for the missing scope; it does not encourage broad shell exploration.

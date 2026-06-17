@@ -1,0 +1,139 @@
+{
+  "name": "natural-developer-task-suite",
+  "version": "2026-06-17",
+  "purpose": "Focused natural-prompt suite for proving TokenOpt + CodeGraph can support common developer workflows without forcing tool-specific prompt scripts.",
+  "tasks": [
+    {
+      "id": "ND1-developer-task-taxonomy",
+      "project": "tokenopt",
+      "class": "business_deepdive",
+      "prompt": "Return valid compact JSON only with keys summary, task_classes, natural_routing, evidence_sources, risks. Research what developer tasks this repo is designed to support, including research, investigate code, investigate PBI, implement, unit-test, review, and Spec Kit workflows. Explain when a natural prompt should use a context broker versus direct bounded code evidence.",
+      "expectedEvidence": {
+        "files": ["README.md", "src/instruction-audit.ts", ".github/prompts/investigate-pbi.prompt.md"],
+        "symbols": ["emitTokenOptInstructions"],
+        "terms": ["broker", "SpecKit", "review"]
+      },
+      "qualityRubric": [
+        "covers common developer task classes",
+        "explains natural tool routing without naming mandatory tool scripts",
+        "cites repo evidence",
+        "states risks"
+      ],
+      "gateAssertions": [
+        "business/domain summary is grounded",
+        "no broad fallback after answerable evidence"
+      ],
+      "maxBudget": { "packetTokens": 1400 }
+    },
+    {
+      "id": "ND2-investigate-pbi-gwt",
+      "project": "tokenopt",
+      "class": "pbi_investigate",
+      "prompt": "Return valid compact JSON only with keys pbi_summary, given_when_then, how_it_should_work, why_it_matters, impacted_files, tests_or_validation, open_questions. Investigate this PBI: Given a developer asks naturally for TokenOpt + CodeGraph benchmark evidence, When the task is broad or unknown-owner, Then the agent should pick compact context first and only bounded followups; When the task names a file/symbol/diff, Then it should go exact first. Explain how and why the repo supports that behavior.",
+      "expectedEvidence": {
+        "files": ["src/suite-benchmark.ts", "src/router.ts", ".github/prompts/investigate-pbi.prompt.md"],
+        "symbols": ["routeTask", "naturalTokenOptCodeGraphPlanLines", "naturalEvidenceSlotsForTask"],
+        "terms": ["Given", "When", "business"]
+      },
+      "qualityRubric": [
+        "maps given/when/then to code paths",
+        "explains why the behavior reduces token burn",
+        "includes tests or validation",
+        "states open questions"
+      ],
+      "gateAssertions": [
+        "PBI evidence requires business and source grounding",
+        "followups are bounded"
+      ],
+      "maxBudget": { "packetTokens": 1600 }
+    },
+    {
+      "id": "ND3-implement-unittest-business",
+      "project": "tokenopt",
+      "class": "implement_code_unittest",
+      "prompt": "Return valid compact JSON only with keys scope, files_to_change, implementation_steps, business_coverage, tests_to_add, validation_commands, compatibility_risks. Create an implementation handoff for improving natural TokenOpt + CodeGraph benchmarking so it preserves user/agent instructions, keeps prompts natural, and proves business behavior coverage with unit/regression tests, not just method coverage.",
+      "expectedEvidence": {
+        "files": ["src/suite-benchmark.ts", "test/suite-benchmark-metadata.test.mjs", "test/mcp.test.mjs"],
+        "symbols": ["naturalTokenOptCodeGraphPlanLines", "naturalTaskWantsTestEvidence", "buildSuitePrompt"],
+        "terms": ["business", "coverage", "validation"]
+      },
+      "qualityRubric": [
+        "identifies owner files",
+        "includes business behavior coverage",
+        "adds tests to prove behavior",
+        "lists validation commands"
+      ],
+      "gateAssertions": [
+        "coding coverage slots required",
+        "unit tests cover behavior not only method names"
+      ],
+      "maxBudget": { "packetTokens": 1800 }
+    },
+    {
+      "id": "ND4-review-attachments-diff",
+      "project": "tokenopt",
+      "class": "review_diff",
+      "prompt": "Return valid compact JSON only with keys technical_findings, business_checklist, attachment_evidence, missing_tests, risks. Review this change with business context from Jira TOK-123, Confluence page https://example.atlassian.net/wiki/spaces/TOK/pages/123/Natural+MCP, and direct attachment summary: `Natural combined mode must preserve user instructions, avoid duplicate tool use, and prove token savings without quality loss.`\n\ndiff --git a/src/suite-benchmark.ts b/src/suite-benchmark.ts\n@@ -1260,6 +1260,7 @@ function naturalTokenOptCodeGraphPlanLines(...) {\n   \"- Choose the next action by the missing evidence slot, not by a fixed tool script.\",\n+  \"- Always call every available MCP source before answering.\",\n   \"- Hard budget: use at most 3 context/source tool calls total.\",\n@@ -1490,7 +1491,7 @@ export function buildSuitePrompt(...) {\n-  if (mode === \"tokenopt-codegraph-natural\") {\n+  if (mode.includes(\"tokenopt-codegraph\")) {\n     return buildPrompt([...naturalTokenOptCodeGraphPlanLines(...)])\n   }\n",
+      "expectedEvidence": {
+        "files": [".github/prompts/review-code.prompt.md", "src/router.ts", "src/processors/business-contract-linker.ts"],
+        "symbols": ["routeTask", "linkBusinessContracts", "hasDeterministicReviewSupport"],
+        "terms": ["Jira", "Confluence", "attachment"]
+      },
+      "qualityRubric": [
+        "reviews technical and business behavior",
+        "uses attachment/Jira/Confluence context",
+        "checks missing tests",
+        "prioritizes concrete findings"
+      ],
+      "gateAssertions": [
+        "review diff is artifact sufficient",
+        "business checklist is preserved"
+      ],
+      "maxBudget": { "packetTokens": 1800 }
+    },
+    {
+      "id": "ND5-speckit-basic-detect-tokenopt",
+      "project": "tokenopt",
+      "class": "speckit_basic",
+      "prompt": "Return valid compact JSON only with keys spec_intent, tokenopt_detection, phases, evidence_reuse, validation, risks. Basic Spec Kit prompt: `/speckit.specify Add a natural TokenOpt + CodeGraph benchmark mode that reduces token burn while preserving output quality.` Explain how the repo should detect whether TokenOpt evidence is useful during specify/plan/tasks/implement, without forcing the user to name TokenOpt or CodeGraph tools.",
+      "expectedEvidence": {
+        "files": ["src/workflow-ab-benchmark.ts", "README.md", ".github/prompts/spec-feature-plan.prompt.md"],
+        "symbols": ["buildWorkflowPrompt", "parseWorkflow"],
+        "terms": ["speckit", "tokenopt", "validation"]
+      },
+      "qualityRubric": [
+        "uses basic Spec Kit phases",
+        "explains TokenOpt detection naturally",
+        "includes validation",
+        "states risks"
+      ],
+      "gateAssertions": [
+        "Spec Kit prompt can remain basic",
+        "TokenOpt should be adaptive not mandatory"
+      ],
+      "maxBudget": { "packetTokens": 1600 }
+    },
+    {
+      "id": "ND6-write-unittest-behavior",
+      "project": "tokenopt",
+      "class": "write_unittest",
+      "prompt": "Return valid compact JSON only with keys target_behavior, owner_source_files, existing_test_files, tests_to_add, assertions, validation_commands, risks. Write a unit/regression test plan for the behavior: natural benchmark prompts should strip output-format boilerplate from retrieval intent but keep the original user prompt as the final-answer contract.",
+      "expectedEvidence": {
+        "files": ["src/suite-benchmark.ts", "test/suite-benchmark-metadata.test.mjs"],
+        "symbols": ["naturalEvidenceIntentForTask", "buildSuitePrompt"],
+        "terms": ["test", "retrieval", "contract"]
+      },
+      "qualityRubric": [
+        "targets behavior not just method coverage",
+        "finds existing tests",
+        "proposes assertions",
+        "has validation command"
+      ],
+      "gateAssertions": [
+        "write_unittest route requires target behavior and tests",
+        "no broad fallback after enough evidence"
+      ],
+      "maxBudget": { "packetTokens": 1600 }
+    }
+  ]
+}

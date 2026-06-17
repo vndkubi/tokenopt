@@ -10,5 +10,5 @@
     "updates UI to surface counts on recall done/load-more state",
     "adds targeted tests or clearly explains validation blockers"
   ],
-  "testCommand": "cmd /c \"backend\\gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\""
+  "testCommand": "cmd /c \"set JAVA_HOME=C:\\Program Files\\JetBrains\\IntelliJ IDEA Community Edition 2024.3\\jbr&& set PATH=C:\\Program Files\\JetBrains\\IntelliJ IDEA Community Edition 2024.3\\jbr\\bin;%PATH%&& gradlew.bat -p backend test --tests com.odde.doughnut.services.RecallServiceWithSpacedRepetitionAlgorithmTest -Dspring.profiles.active=test --build-cache --parallel\""
 }
