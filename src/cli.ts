@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { runBenchmarkCommand } from "./benchmark.js";
 import { runCodexBenchmarkCommand } from "./codex-benchmark.js";
-import { setupCopilotProject, type CopilotSetupScope } from "./copilot-setup.js";
+import { setupCopilotProject, type CopilotGatewayLevel, type CopilotSetupScope } from "./copilot-setup.js";
 import { runSuiteBenchmarkCommand } from "./suite-benchmark.js";
 import { runWorkflowAbBenchmarkCommand } from "./workflow-ab-benchmark.js";
 import { loadConfig, makeDefaultRepoConfig, ensureConfigDir } from "./config.js";
@@ -27,7 +27,8 @@ import { appendEvent } from "./observability.js";
 import { buildReport } from "./report.js";
 import type { TokenOptHookEventName } from "./types.js";
 
-const HOOK_EVENTS = new Set<TokenOptHookEventName>(["user-prompt-submit", "pre-tool-use", "post-tool-use", "pre-compact"]);
+const CODEX_HOOK_EVENTS = new Set<TokenOptHookEventName>(["user-prompt-submit", "pre-tool-use", "post-tool-use", "pre-compact"]);
+const COPILOT_HOOK_EVENTS = new Set<TokenOptHookEventName>(["user-prompt-submit", "pre-tool-use", "post-tool-use", "pre-compact", "agent-stop"]);
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
   const [command, subcommand, ...rest] = argv;
@@ -87,8 +88,10 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         installPrompts: options.installPrompts,
         includeRunCommand: options.includeRunCommand,
         includeCodeGraph: options.includeCodeGraph,
+        gatewayLevel: options.gatewayLevel,
         codeGraphConfigured: result.codeGraphConfigured,
-        codeGraphCliPath: result.codeGraphCliPath
+        codeGraphCliPath: result.codeGraphCliPath,
+        hookConfigPath: result.hookConfigPath
       }
     });
     process.stdout.write(formatCopilotSetupResult(result));
@@ -97,7 +100,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   if (command === "hook" && subcommand === "codex") {
     const eventName = rest[0] as TokenOptHookEventName | undefined;
-    if (!eventName || !HOOK_EVENTS.has(eventName)) {
+    if (!eventName || !CODEX_HOOK_EVENTS.has(eventName)) {
       process.stderr.write("Usage: tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact\n");
       return 2;
     }
@@ -107,8 +110,8 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
 
   if (command === "hook" && subcommand === "copilot") {
     const eventName = rest[0] as TokenOptHookEventName | undefined;
-    if (!eventName || !HOOK_EVENTS.has(eventName)) {
-      process.stderr.write("Usage: tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact\n");
+    if (!eventName || !COPILOT_HOOK_EVENTS.has(eventName)) {
+      process.stderr.write("Usage: tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact|agent-stop\n");
       return 2;
     }
     await handleCopilotHook(eventName);
@@ -300,6 +303,7 @@ function parseCopilotSetupOptions(args: string[]): {
   includeCodeGraph?: boolean;
   codeGraphCliPath?: string;
   codeGraphRoot?: string;
+  gatewayLevel?: CopilotGatewayLevel;
 } {
   let scope: CopilotSetupScope = "both";
   let installAgents = true;
@@ -310,6 +314,7 @@ function parseCopilotSetupOptions(args: string[]): {
   let vscodeMcpConfigPath: string | undefined;
   let codeGraphCliPath: string | undefined;
   let codeGraphRoot: string | undefined;
+  let gatewayLevel: CopilotGatewayLevel | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -368,6 +373,15 @@ function parseCopilotSetupOptions(args: string[]): {
       includeCodeGraph = true;
       continue;
     }
+    if (arg === "--gateway-level") {
+      const value = args[index + 1];
+      if (value !== "routing" && value !== "policy") {
+        throw new Error("--gateway-level must be routing or policy");
+      }
+      gatewayLevel = value;
+      index += 1;
+      continue;
+    }
     if (arg === "--no-codegraph") {
       includeCodeGraph = false;
       continue;
@@ -395,7 +409,7 @@ function parseCopilotSetupOptions(args: string[]): {
     throw new Error(`Unknown Copilot setup option: ${arg}`);
   }
 
-  return { scope, installAgents, installPrompts, tokenoptCliPath, vscodeMcpConfigPath, includeRunCommand, includeCodeGraph, codeGraphCliPath, codeGraphRoot };
+  return { scope, installAgents, installPrompts, tokenoptCliPath, vscodeMcpConfigPath, includeRunCommand, includeCodeGraph, codeGraphCliPath, codeGraphRoot, gatewayLevel };
 }
 
 function parseMcpMode(args: string[]): "lite" | "full" | "broker" | undefined {
@@ -429,6 +443,7 @@ function formatCopilotSetupResult(result: {
   nextSteps: string[];
   mcpConfigPath?: string;
   vscodeMcpConfigPath?: string;
+  hookConfigPath?: string;
   codeGraphConfigured?: boolean;
   codeGraphCliPath?: string;
 }): string {
@@ -439,6 +454,7 @@ function formatCopilotSetupResult(result: {
     `codegraph: ${result.codeGraphConfigured ? `configured (${result.codeGraphCliPath ?? "detected"})` : "not configured"}`,
     `copilot cli mcp: ${result.mcpConfigPath ?? "not written"}`,
     `vs code mcp: ${result.vscodeMcpConfigPath ?? "not written"}`,
+    `copilot hooks: ${result.hookConfigPath ?? "not written"}`,
     "",
     "files:",
     ...result.files.map((filePath) => `- ${filePath}`),
@@ -458,10 +474,10 @@ function helpText(): string {
 Commands:
   tokenopt init
   tokenopt install codex --scope user|repo
-  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
-  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+  tokenopt setup copilot --scope user|repo|both [--gateway-level routing|policy] [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+  tokenopt install copilot --scope user|repo|both [--gateway-level routing|policy] [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
   tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
-  tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
+  tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact|agent-stop
   tokenopt exec -- <command...>
   tokenopt mcp [--mode lite|full]
   tokenopt benchmark daily --repo <path> [--mode all]

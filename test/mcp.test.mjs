@@ -167,6 +167,69 @@ test("mcp contextgate broker exposes natural coverage contract", async () => {
   );
 });
 
+test("mcp contextgate binds external MCP artifacts to source evidence slots", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "contextgate-external-artifact-repo-"));
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "contextgate-external-fixture", scripts: { test: "vitest run" } }, null, 2)
+  );
+  fs.mkdirSync(path.join(repo, "src", "fraud"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "test", "fraud"), { recursive: true });
+  fs.writeFileSync(
+    path.join(repo, "src", "fraud", "FraudReviewService.ts"),
+    [
+      "export class FraudReviewService {",
+      "  shouldManualReview(totalCents: number): boolean {",
+      "    return totalCents > 50000;",
+      "  }",
+      "  enrichOrder(order: { totalCents: number; manualReview?: boolean }) {",
+      "    return { ...order, manualReview: this.shouldManualReview(order.totalCents) };",
+      "  }",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "test", "fraud", "FraudReviewService.test.ts"),
+    "import { FraudReviewService } from '../../src/fraud/FraudReviewService';\nit('marks high value orders for manual review', () => expect(new FraudReviewService().shouldManualReview(60000)).toBe(true));\n"
+  );
+
+  await withTokenOptMcp(
+    async (client) => {
+      const packet = await client.callTool({
+        name: "contextgate_get_context",
+        arguments: {
+          task: "Plan implementation for the supplied PBI and identify files, tests, and risks.",
+          task_type: "implement",
+          required_slots: ["source_files", "service_domain_logic", "existing_tests"],
+          external_artifacts: [
+            {
+              source: "jira",
+              id: "PBI-42",
+              title: "Manual review for high-risk orders",
+              summary: "Acceptance criteria: route high-value orders through FraudReviewService, set the manualReview flag, and verify FraudReviewService tests."
+            }
+          ],
+          cwd: repo,
+          include_structured_packet: true
+        }
+      });
+
+      assert.equal(packet.isError ?? false, false);
+      assert.match(packet.content[0].text, /External artifacts supplied: jira:PBI-42:Manual review for high-risk orders/);
+      assert.match(packet.content[0].text, /external_artifact_count=1/);
+      assert.match(packet.content[0].text, /external_terms=.*FraudReviewService/);
+      assert.match(packet.content[0].text, /FraudReviewService -> src\/fraud\/FraudReviewService\.ts/);
+      assert.match(packet.content[0].text, /test\/fraud\/FraudReviewService\.test\.ts/);
+      assert.equal(packet.structuredContent.effectiveAnswerable, true);
+      assert.equal(packet.structuredContent.externalArtifacts[0].source, "jira");
+      assert.equal(packet.structuredContent.externalArtifacts[0].id, "PBI-42");
+      assert.equal(packet.structuredContent.inlineEvidence.carryTerms.includes("FraudReviewService"), true);
+      assert.equal(packet.structuredContent.inlineEvidence.coverage.feature_test_grounding, "covered");
+    },
+    { cwd: repo }
+  );
+});
+
 test("mcp full mode runs coding coverage tools", async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-coding-mcp-repo-"));
   fs.mkdirSync(path.join(repo, "src", "orders"), { recursive: true });

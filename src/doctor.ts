@@ -41,6 +41,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
   const copilotPathInstructionsPath = path.join(loaded.repoRoot, ".github", "instructions", "tokenopt.instructions.md");
   const copilotAgentPath = path.join(loaded.repoRoot, ".github", "agents", "tokenopt-cost-gate.agent.md");
   const agentsPath = path.join(loaded.repoRoot, "AGENTS.md");
+  const hooksPath = path.join(loaded.repoRoot, ".github", "hooks", "tokenopt-gateway.json");
   const mcpConfigPath = getCopilotMcpConfigPath();
   const vscodeMcpConfigPath = path.join(loaded.repoRoot, ".vscode", "mcp.json");
   const checks = [
@@ -49,6 +50,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     check("repo Copilot instructions", copilotInstructionsPath, fs.existsSync(copilotInstructionsPath)),
     check("repo Copilot path instructions", copilotPathInstructionsPath, fs.existsSync(copilotPathInstructionsPath)),
     check("repo Copilot custom agent", copilotAgentPath, fs.existsSync(copilotAgentPath)),
+    check("repo Copilot policy hooks", hooksPath, fs.existsSync(hooksPath)),
     check("repo AGENTS.md", agentsPath, fs.existsSync(agentsPath)),
     check("user Copilot MCP config", mcpConfigPath, fs.existsSync(mcpConfigPath)),
     check("VS Code workspace MCP config", vscodeMcpConfigPath, fs.existsSync(vscodeMcpConfigPath)),
@@ -67,7 +69,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     "CodeGraph verification: if graph evidence is expected, run `/mcp show codegraph` too.",
     "VS Code Copilot Agent verification: run MCP: List Servers, start tokenopt/codegraph, and enable their tools in the chat Configure Tools picker.",
     "GitHub.com cloud agent/code review: configure MCP JSON in Repository -> Settings -> Copilot -> MCP servers; local Windows paths do not work there.",
-    "Copilot hooks are not installed by TokenOpt yet; use MCP + instructions for Copilot today."
+    "Policy gateway verification: if .github/hooks/tokenopt-gateway.json exists, check the GitHub Copilot Chat Hooks output channel and use TOKENOPT_GATEWAY_POLICY=hard only after shadow behavior is correct."
   ].join("\n");
 }
 

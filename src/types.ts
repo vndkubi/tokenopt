@@ -2,15 +2,18 @@ export type TokenOptHookEventName =
   | "user-prompt-submit"
   | "pre-tool-use"
   | "post-tool-use"
-  | "pre-compact";
+  | "pre-compact"
+  | "agent-stop";
 
-export type TokenOptSource = "codex" | "mcp";
+export type TokenOptSource = "codex" | "copilot" | "mcp";
 
 export type PolicyAction = "allow" | "deny" | "rewrite" | "context" | "compress";
 
 export type BroadSearchMode = "deny" | "warn";
 export type ExpensiveTestMode = "allow" | "warn" | "rewrite";
 export type AnswerabilityGateMode = "hard" | "shadow" | "off";
+export type GatewayPolicyMode = "off" | "shadow" | "hard";
+export type GatewayRequirementKind = "pbi_code" | "requirement_code" | "review_business_coverage";
 export type TaskClass =
   | "broad_flow"
   | "review_diff"
@@ -83,6 +86,10 @@ export interface TokenOptConfig {
     answerabilityGate: {
       mode: AnswerabilityGateMode;
       logShadowDecisions: boolean;
+    };
+    gateway: {
+      mode: GatewayPolicyMode;
+      requireContextGateFor: GatewayRequirementKind[];
     };
   };
   context: {

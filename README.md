@@ -28,10 +28,10 @@ node dist/cli.js doctor
 ```text
 tokenopt init
 tokenopt install codex --scope user|repo
-tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
-tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+tokenopt setup copilot --scope user|repo|both [--gateway-level routing|policy] [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+tokenopt install copilot --scope user|repo|both [--gateway-level routing|policy] [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
 tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
-tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
+tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact|agent-stop
 tokenopt exec -- <command...>
 tokenopt mcp [--mode lite|full]
 tokenopt benchmark daily --repo <path> [--task all] [--mode all] [--repeat 5] [--randomize] [--out results.json]
@@ -164,7 +164,14 @@ node <tokenopt-repo>\dist\cli.js setup copilot --scope both
 node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
-This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, `.github/prompts/*.prompt.md`, merges a lite `tokenopt` server into `<home>/.copilot/mcp-config.json` for Copilot CLI, and writes `.vscode/mcp.json` for VS Code Copilot Agent. Both local configs use `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions + native prompt files today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
+This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, `.github/prompts/*.prompt.md`, merges a lite `tokenopt` server into `<home>/.copilot/mcp-config.json` for Copilot CLI, and writes `.vscode/mcp.json` for VS Code Copilot Agent. Both local configs use `node <absolute-tokenopt-cli-js> mcp --mode lite`.
+
+Gateway levels:
+
+- `--gateway-level routing` is the default. It uses MCP descriptions, repo instructions, prompt files, and the custom agent to steer Copilot toward `contextgate_get_context`. This is advisory and can still be skipped by the model.
+- `--gateway-level policy` also writes `.github/hooks/tokenopt-gateway.json` for VS Code/Copilot hooks. Hooks mark PBI/requirement + code tasks as incomplete until ContextGate source evidence exists, block raw source acquisition in hard mode, and block final answer on `Stop` when requirement evidence exists but ContextGate has not run. Policy mode defaults to shadow behavior through `policy.gateway.mode=shadow`; set `TOKENOPT_GATEWAY_POLICY=hard` or repo config after validation.
+
+Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
 
 After setup, use Copilot/Codex normally. In Copilot UI, call native slash prompts such as `/investigate-flow <area>`, `/e2e-trace-flow <endpoint>`, `/bug-trace <failing test or stack frame>`, `/write-unittest-class OrderService payment authorization`, `/investigate-pbi <PBI>`, `/review-code <diff>`, or `/security-audit <diff or PR scope>`. In Codex, type natural tasks; `AGENTS.md` carries the routing rules.
 

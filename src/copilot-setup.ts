@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { installNativePromptPack, installTokenOptInstructions } from "./instruction-audit.js";
 
 export type CopilotSetupScope = "user" | "repo" | "both";
+export type CopilotGatewayLevel = "routing" | "policy";
 
 export const TOKENOPT_COPILOT_LITE_MCP_TOOLS = [
   "contextgate_get_context",
@@ -37,6 +38,7 @@ export interface CopilotSetupOptions {
   includeCodeGraph?: boolean;
   codeGraphCliPath?: string;
   codeGraphRoot?: string;
+  gatewayLevel?: CopilotGatewayLevel;
 }
 
 export interface CopilotSetupResult {
@@ -51,6 +53,7 @@ export interface CopilotSetupResult {
   agentsPath?: string;
   copilotAgentPath?: string;
   promptFiles: string[];
+  hookConfigPath?: string;
   codeGraphConfigured: boolean;
   codeGraphCliPath?: string;
 }
@@ -61,6 +64,7 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
   const installAgents = options.installAgents ?? true;
   const installPrompts = options.installPrompts ?? true;
   const includeRunCommand = options.includeRunCommand ?? false;
+  const gatewayLevel = options.gatewayLevel ?? "routing";
   const files: string[] = [];
   const warnings: string[] = [];
   const nextSteps: string[] = [];
@@ -81,6 +85,16 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
 
   const promptFiles = installPrompts ? installNativePromptPack(repoRoot) : [];
   files.push(...promptFiles);
+
+  let hookConfigPath: string | undefined;
+  if (gatewayLevel === "policy") {
+    hookConfigPath = installCopilotGatewayHooks({
+      repoRoot,
+      tokenoptCliPath: options.tokenoptCliPath
+    });
+    files.push(hookConfigPath);
+    nextSteps.push("For VS Code Copilot Agent, verify hooks from the GitHub Copilot Chat Hooks output channel or Chat: Configure Hooks.");
+  }
 
   let mcpConfigPath: string | undefined;
   if (scope === "user" || scope === "both") {
@@ -138,7 +152,11 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
   } else if (writesLocalMcpConfig && !codeGraphConfigured) {
     warnings.push("CodeGraph MCP was not configured. Natural prompts can still use TokenOpt, but graph/source evidence requires --include-codegraph plus a CodeGraph CLI/root.");
   }
-  warnings.push("Copilot hooks were not installed. TokenOpt does not ship a Copilot hook adapter yet; use MCP + instructions for Copilot today.");
+  if (gatewayLevel === "routing") {
+    warnings.push("Copilot setup used routing gateway mode; instructions and MCP guide tool choice, but hooks do not enforce acquisition order. Rerun with --gateway-level policy to install VS Code/Copilot hooks.");
+  } else {
+    warnings.push("Copilot policy gateway hooks were installed in shadow mode by default. Set policy.gateway.mode or TOKENOPT_GATEWAY_POLICY=hard after validating hook behavior.");
+  }
 
   return {
     repoRoot,
@@ -154,6 +172,7 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     agentsPath,
     copilotAgentPath,
     promptFiles,
+    hookConfigPath,
     codeGraphConfigured,
     codeGraphCliPath: codeGraphResolution?.cliPath
   };
@@ -276,6 +295,33 @@ export function installVsCodeWorkspaceMcpConfig(options: {
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });
   fs.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return configPath;
+}
+
+export function installCopilotGatewayHooks(options: {
+  repoRoot: string;
+  tokenoptCliPath?: string;
+}): string {
+  const repoRoot = path.resolve(options.repoRoot);
+  const configPath = path.join(repoRoot, ".github", "hooks", "tokenopt-gateway.json");
+  const tokenoptCliPath = normalizeJsonPath(path.resolve(options.tokenoptCliPath ?? getDefaultTokenOptCliPath()));
+  const command = (event: string) => `node "${tokenoptCliPath}" hook copilot ${event}`;
+  const hook = (event: string, timeout = 10) => ({
+    type: "command",
+    command: command(event),
+    windows: command(event),
+    timeout
+  });
+  const config = {
+    hooks: {
+      UserPromptSubmit: [hook("user-prompt-submit", 8)],
+      PreToolUse: [hook("pre-tool-use", 10)],
+      PostToolUse: [hook("post-tool-use", 10)],
+      Stop: [hook("agent-stop", 8)]
+    }
+  };
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
   return configPath;
 }
 

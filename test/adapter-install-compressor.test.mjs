@@ -262,7 +262,34 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.deepEqual(vscodeConfig.servers.tokenopt.args, [tokenoptCliPath.replace(/\\/g, "/"), "mcp", "--mode", "lite"]);
   assert.doesNotMatch(JSON.stringify(vscodeConfig.servers.tokenopt), /\bnpm(?:\.cmd|\.ps1)?\b/i);
   assert.ok(result.warnings.some((warning) => /lite mode/i.test(warning)));
-  assert.ok(result.warnings.some((warning) => /hooks were not installed/i.test(warning)));
+  assert.ok(result.warnings.some((warning) => /routing gateway mode/i.test(warning)));
+  assert.equal(result.hookConfigPath, undefined);
+});
+
+test("Copilot setup policy gateway writes VS Code hook config", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-copilot-policy-"));
+  const copilotConfigPath = path.join(repo, "mcp-config.json");
+  const tokenoptCliPath = path.resolve("dist/cli.js");
+
+  const result = setupCopilotProject({
+    repoRoot: repo,
+    scope: "repo",
+    copilotConfigPath,
+    tokenoptCliPath,
+    gatewayLevel: "policy",
+    includeCodeGraph: false,
+    installPrompts: false
+  });
+
+  const hookPath = path.join(repo, ".github", "hooks", "tokenopt-gateway.json");
+  const hooks = JSON.parse(fs.readFileSync(hookPath, "utf8"));
+  assert.equal(result.hookConfigPath, hookPath);
+  assert.ok(result.files.includes(hookPath));
+  assert.match(hooks.hooks.UserPromptSubmit[0].command, /hook copilot user-prompt-submit/);
+  assert.match(hooks.hooks.PreToolUse[0].command, /hook copilot pre-tool-use/);
+  assert.match(hooks.hooks.PostToolUse[0].command, /hook copilot post-tool-use/);
+  assert.match(hooks.hooks.Stop[0].command, /hook copilot agent-stop/);
+  assert.ok(result.warnings.some((warning) => /policy gateway hooks were installed/i.test(warning)));
 });
 
 test("Copilot setup configures CodeGraph MCP when a CodeGraph root is provided", () => {

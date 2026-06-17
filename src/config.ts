@@ -33,12 +33,16 @@ export const DEFAULT_CONFIG: TokenOptConfig = {
     answerabilityGate: {
       mode: "hard",
       logShadowDecisions: true
+    },
+    gateway: {
+      mode: "shadow",
+      requireContextGateFor: ["pbi_code", "requirement_code", "review_business_coverage"]
     }
   },
   context: {
     enableSecretBlock: true,
     userPromptGuidance:
-      "ContextGate is active as an evidence broker, not a mandatory extra step. For broad repo evidence, business/domain research, implementation planning, or unit-test planning, use contextgate_get_context when it can replace raw exploration. Treat the packet as a coverage contract: if answerable=true, answer from it with zero redundant exploration; if slots are missing, refill only those named slots with bounded context/search/read followups. For exact known-file edits, narrow direct reads are acceptable. Avoid MCP+shell double-spend."
+      "ContextGate is the primary source-evidence gate and evidence broker for broad or unknown-owner repository tasks. For repo investigation, architecture, flow tracing, implementation planning, PBI-to-code impact, code review with a diff, debugging, refactor scope, build handoff, or unit-test planning, call contextgate_get_context first when it can replace raw exploration. Use Jira/Confluence/GitHub tools for external artifacts, then use ContextGate for source-code slots such as impacted files, symbols, current behavior, tests, and validation. Treat the packet as a coverage contract: if answerable=true or recommended_next_action=answer_now, answer from it with zero redundant exploration; if slots are missing, refill only those named slots with bounded TokenOpt search/read followups. For exact known-file or exact line-level edits, narrow direct reads are acceptable. Avoid MCP+shell double-spend."
   },
   paths: {},
   codex: {
@@ -129,6 +133,12 @@ function applyEnvOverrides(config: TokenOptConfig, env: NodeJS.ProcessEnv): Toke
     const mode = env.TOKENOPT_ANSWERABILITY_GATE.toLowerCase();
     if (mode === "hard" || mode === "shadow" || mode === "off") {
       next.policy.answerabilityGate.mode = mode;
+    }
+  }
+  if (env.TOKENOPT_GATEWAY_POLICY) {
+    const mode = env.TOKENOPT_GATEWAY_POLICY.toLowerCase();
+    if (mode === "hard" || mode === "shadow" || mode === "off") {
+      next.policy.gateway.mode = mode;
     }
   }
   return next;

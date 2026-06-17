@@ -14,7 +14,11 @@ const COPILOT_EVENT_MAP: Record<string, TokenOptHookEventName> = {
   PostToolUse: "post-tool-use",
   postToolUse: "post-tool-use",
   PreCompact: "pre-compact",
-  preCompact: "pre-compact"
+  preCompact: "pre-compact",
+  Stop: "agent-stop",
+  stop: "agent-stop",
+  AgentStop: "agent-stop",
+  agentStop: "agent-stop"
 };
 
 export async function handleCopilotHook(eventName: TokenOptHookEventName): Promise<void> {
@@ -40,7 +44,7 @@ export async function handleCopilotHook(eventName: TokenOptHookEventName): Promi
 
   appendEvent(loaded.config, {
     timestamp: new Date().toISOString(),
-    source: "codex",
+    source: "copilot",
     eventName: `copilot-${event.eventName}`,
     repoRoot: loaded.repoRoot,
     action: decision.action,
@@ -68,7 +72,7 @@ export function normalizeCopilotEvent(raw: Record<string, unknown>, fallbackName
     throw new Error(`Unsupported Copilot hook event: ${rawName || "<missing>"}`);
   }
   return {
-    source: "codex",
+    source: "copilot",
     eventName,
     cwd: typeof raw.cwd === "string" ? raw.cwd : process.cwd(),
     sessionId: typeof raw.session_id === "string" ? raw.session_id : typeof raw.sessionId === "string" ? raw.sessionId : undefined,
@@ -122,6 +126,33 @@ export function adaptDecisionToCopilot(eventName: TokenOptHookEventName, decisio
       modifiedResult: decision.replacementText ?? decision.reason ?? "TokenOpt compressed the tool output.",
       additionalContext: decision.replacementText ?? decision.reason
     };
+  }
+  if (eventName === "post-tool-use" && decision.additionalContext) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PostToolUse",
+        additionalContext: decision.additionalContext
+      }
+    };
+  }
+  if (eventName === "agent-stop") {
+    if (decision.action === "deny") {
+      return {
+        hookSpecificOutput: {
+          hookEventName: "Stop",
+          decision: "block",
+          reason: decision.reason ?? "ContextGate policy blocked stop."
+        }
+      };
+    }
+    if (decision.additionalContext) {
+      return {
+        hookSpecificOutput: {
+          hookEventName: "Stop",
+          additionalContext: decision.additionalContext
+        }
+      };
+    }
   }
   if (eventName === "pre-compact" && decision.systemMessage) {
     return {

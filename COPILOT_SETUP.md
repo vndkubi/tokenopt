@@ -1,6 +1,6 @@
 # TokenOpt + GitHub Copilot Setup
 
-This guide is for GitHub Copilot surfaces. TokenOpt currently supports Copilot through MCP and custom instructions. A native Copilot hook adapter is not implemented yet.
+This guide is for GitHub Copilot surfaces. TokenOpt supports Copilot through MCP, custom instructions, native prompt files, and optional VS Code/Copilot policy hooks.
 
 ## What Works Today
 
@@ -35,7 +35,7 @@ Not implemented yet:
 | Agent instructions | Recommended | `tokenopt setup copilot` writes `AGENTS.md` by default; use `--no-agents` to skip. |
 | Native prompt files | Recommended | `tokenopt setup copilot` writes `.github/prompts/*.prompt.md` by default; use `--no-prompts` to skip. |
 | Skills | No for V1 | TokenOpt is not packaged as a Copilot skill. MCP + instructions are enough for current behavior. |
-| Hooks | Not yet | Do not install Copilot hooks until `tokenopt hook copilot ...` exists. |
+| Hooks | Optional policy gateway | `tokenopt setup copilot --gateway-level policy` writes `.github/hooks/tokenopt-gateway.json` for VS Code/Copilot hooks. |
 
 Scope meaning:
 
@@ -357,31 +357,38 @@ Important cloud caveats:
 - Avoid exposing `tokenopt_run_command` in cloud/code review unless you intentionally want command execution.
 - Cloud agent runs non-interactively; do not rely on prompts for approval.
 
-## Copilot Hooks Status
+## Gateway Levels
 
-GitHub Copilot supports hooks, including `preToolUse`, `postToolUse`, and `userPromptSubmitted`, but TokenOpt does not yet ship a Copilot hook adapter.
-
-Current recommendation:
-
-```text
-Use MCP + instructions for Copilot today.
-Do not configure TokenOpt Copilot hooks until tokenopt hook copilot is implemented.
-```
-
-Already implemented MCP/instruction setup:
+Routing gateway is the default:
 
 ```text
 tokenopt setup copilot --scope user|repo|both
 tokenopt install copilot --scope user|repo|both
 ```
 
-Future hook adapter shape:
+This installs MCP, instructions, custom agent, and prompt files. It is cheap and portable across Copilot surfaces, but it is advisory: the model can still decide Jira/Confluence is enough.
+
+Policy gateway adds VS Code/Copilot hooks:
 
 ```text
-tokenopt hook copilot user-prompt-submitted|pre-tool-use|post-tool-use|agent-stop
+tokenopt setup copilot --scope both --gateway-level policy
+tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|agent-stop
 ```
 
-The core TokenOpt state model is already reusable for this, but the Copilot input/output JSON schemas need a dedicated adapter.
+Policy gateway uses `UserPromptSubmit`, `PostToolUse`, `PreToolUse`, and `Stop` hooks. It detects PBI/Jira/Confluence/requirement + code/implement/test/impact/debug intent, marks requirement acquisition after Jira/Confluence/GitHub tools, requires `contextgate_get_context` with `external_artifacts` before raw source exploration or final answer, and blocks redundant source acquisition after `answerable=true`.
+
+Default policy mode is shadow. Configure hard mode only after verifying hooks load in the GitHub Copilot Chat Hooks output channel:
+
+```json
+{
+  "policy": {
+    "gateway": {
+      "mode": "hard",
+      "requireContextGateFor": ["pbi_code", "requirement_code", "review_business_coverage"]
+    }
+  }
+}
+```
 
 ## Recommended Prompt
 
@@ -433,7 +440,7 @@ If Copilot still uses shell too much:
 - Ask it to call `tokenopt_compile_evidence` by name.
 - For existing-flow prompts in shell-enabled sessions, do not force MCP-first if the answer still needs line-level code proof. Use native narrow search/read directly, or run a strict MCP-only session.
 - For business/domain prompts, make sure the packet is `task_type=research_business`; it should include business purpose, likely users, core capabilities, major project areas, domain terms, and final-answer sections.
-- Remove or restrict broad shell permissions only if your Copilot surface supports that control. TokenOpt's current Copilot support is MCP + instructions, not native Copilot hook enforcement.
+- For stricter enforcement in VS Code/Copilot, rerun setup with `--gateway-level policy` and verify `.github/hooks/tokenopt-gateway.json` is loaded.
 
 ## References
 

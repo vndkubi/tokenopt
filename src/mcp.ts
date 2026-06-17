@@ -101,8 +101,35 @@ interface RepositoryOverview {
   summary: string;
 }
 
-const SERVER_INSTRUCTIONS =
-  "ContextGate is a bounded repository evidence broker. Use contextgate_get_context when it can replace broad exploration; it returns coverage slots, answerability, and broker-owned inline evidence. In broker mode, answer from an answerable packet with zero redundant tools; legacy tokenopt_* exact followups are reserved for lite/full modes.";
+interface ExternalArtifactEvidence {
+  source: "jira" | "confluence" | "github" | "attachment" | "other";
+  id?: string;
+  title?: string;
+  url?: string;
+  summary?: string;
+  text?: string;
+}
+
+const SERVER_INSTRUCTIONS = [
+  "# ContextGate - TokenOpt repository evidence router",
+  "",
+  "ContextGate is the PRIMARY source-evidence gate for repository tasks. For broad or unknown-owner repo work, PBI implementation planning, code review with a diff, debugging, refactor scope, unit-test planning, onboarding, architecture, API flow, and impact analysis, call contextgate_get_context FIRST before starting a grep/read/shell exploration loop.",
+  "",
+  "Tool selection by intent:",
+  "- Broad repo investigation, architecture, how-does-X-work, flow tracing, implementation planning, PBI-to-code impact, or unit-test planning -> contextgate_get_context FIRST with the full natural task, required evidence slots, budget, and quality rubric.",
+  "- Concrete diff, PR, branch, or changed-file review -> tokenopt_compile_evidence with task_type=review_diff when it can cover changed files, symbols, similar logic, tests, and requirement evidence.",
+  "- After a non-answerable packet -> use tokenopt_search or tokenopt_read_file only for exact missing files, symbols, tests, or slots named by the packet.",
+  "- Jira, Confluence, GitHub, or attachment requests -> use those tools for the external artifact, then pass the fetched summary/body through external_artifacts when calling ContextGate/TokenOpt for impacted files, current behavior, tests, or validation.",
+  "",
+  "Anti-patterns:",
+  "- Do not call ContextGate/TokenOpt and then repeat the same discovery with broad shell, grep, search, or full-file reads.",
+  "- If answerable=true and missing=[] or the broker says answer_now, answer from the packet and stop acquiring duplicate context.",
+  "- Do not use tokenopt_search or tokenopt_read_file as broad first tools; they are bounded followups after a packet names the missing evidence.",
+  "",
+  "When not to use ContextGate first:",
+  "- Exact known-file edits, exact line-level bug proof, or a single named method where a narrow read is already the cheapest path.",
+  "- Pure external-system questions that only need Jira, Confluence, GitHub, or docs evidence and do not need repository source context."
+].join("\n");
 
 export async function runMcpServer(): Promise<void> {
   const server = new Server(
@@ -124,7 +151,7 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "contextgate_get_context",
         title: "Get Bounded Repository Context",
-        description: "Natural context broker for coding agents. Compiles a coverage contract, evidence packet, missing slots, and bounded followups for the user's task. Use when repository evidence is needed and broad raw exploration would otherwise be likely; skip it for already-known exact file edits.",
+        description: "PRIMARY SOURCE-EVIDENCE GATE - call FIRST for broad or unknown-owner repository tasks: investigate code, trace flows, understand architecture, plan implementation from a PBI, map Jira/Confluence requirements to impacted files, design unit tests, debug behavior, review impact, or find current behavior. When another MCP already fetched Jira/Confluence/GitHub content, pass it as external_artifacts so ContextGate can bind requirements to source-code slots. Returns a coverage contract with answerability, missing slots, inline source evidence, impacted files/symbols/tests, and bounded followups. If answerable=true or answer_now, answer from the packet without grep/read/shell duplication. Skip only when an exact file, line, or symbol is already known and a narrow read is cheaper.",
         inputSchema: {
           type: "object",
           properties: {
@@ -159,6 +186,22 @@ export async function runMcpServer(): Promise<void> {
               items: { type: "string" },
               description: "Quality checks for the final answer."
             },
+            external_artifacts: {
+              type: "array",
+              description: "Requirement/business artifacts already fetched from other MCPs, such as Jira issues, Confluence pages, GitHub issues/PRs, or attachments. ContextGate uses these as requirement evidence, then gates repository source-code slots.",
+              items: {
+                type: "object",
+                properties: {
+                  source: { type: "string", enum: ["jira", "confluence", "github", "attachment", "other"] },
+                  id: { type: "string" },
+                  title: { type: "string" },
+                  url: { type: "string" },
+                  summary: { type: "string" },
+                  text: { type: "string" }
+                },
+                additionalProperties: false
+              }
+            },
             detail: {
               type: "string",
               enum: ["compact", "full"],
@@ -184,7 +227,7 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_compile_evidence",
         title: "Compile Answerability Evidence",
-        description: "Compile compact task evidence and followup policy.",
+        description: "PRIMARY COMPACT EVIDENCE COMPILER - call FIRST for review_diff packets, broad repo research, implementation planning, debugging, API flow, field impact, startup flow, and unit-test planning when a bounded packet can replace search/read loops. Accepts external_artifacts from Jira/Confluence/GitHub/attachments as requirement evidence while TokenOpt gates repository source evidence. Returns answerable, missing coverage, evidence items, quality contract, allowed exact followups, and stop rules. If answerable=true, answer directly without repeating the same evidence through shell, grep, search, or full-file reads.",
         inputSchema: {
           type: "object",
           properties: {
@@ -213,6 +256,22 @@ export async function runMcpServer(): Promise<void> {
               type: "array",
               items: { type: "string" },
               description: "Quality checklist."
+            },
+            external_artifacts: {
+              type: "array",
+              description: "Requirement/business artifacts already fetched from other MCPs, such as Jira issues, Confluence pages, GitHub issues/PRs, or attachments. TokenOpt treats these as external evidence and uses repository acquisition only for missing source-code slots.",
+              items: {
+                type: "object",
+                properties: {
+                  source: { type: "string", enum: ["jira", "confluence", "github", "attachment", "other"] },
+                  id: { type: "string" },
+                  title: { type: "string" },
+                  url: { type: "string" },
+                  summary: { type: "string" },
+                  text: { type: "string" }
+                },
+                additionalProperties: false
+              }
             },
             detail: {
               type: "string",
@@ -260,7 +319,7 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_search",
         title: "Search Repository Through TokenOpt",
-        description: "Targeted repo search with compact output.",
+        description: "FOLLOWUP ONLY after contextgate_get_context or tokenopt_compile_evidence names a missing exact pattern, file, symbol, test, route, or evidence slot. Searches repository text with compact bounded output. Do NOT use as the first tool for broad investigation, architecture, PBI planning, or review; call the evidence gate first so search stays narrow.",
         inputSchema: {
           type: "object",
           properties: {
@@ -282,7 +341,7 @@ export async function runMcpServer(): Promise<void> {
       {
         name: "tokenopt_read_file",
         title: "Read Bounded File Slice",
-        description: "Read bounded source slice.",
+        description: "FOLLOWUP ONLY after a ContextGate/TokenOpt packet identifies an exact file, symbol, or line range that still needs source proof. Reads a bounded source slice with line numbers. Use instead of full-file reads for named missing evidence. Do NOT use as the first tool for broad exploration.",
         inputSchema: {
           type: "object",
           properties: {
@@ -612,9 +671,11 @@ export async function runMcpServer(): Promise<void> {
 
 function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
   const task = sanitizeTaskPrompt(requiredString(args, "task"));
+  const externalArtifacts = parseExternalArtifacts(args);
+  const taskWithExternalArtifacts = appendExternalArtifactContext(task, externalArtifacts);
   const cwd = optionalString(args, "cwd") ?? process.cwd();
   const loaded = loadConfig({ cwd });
-  const taskType = normalizeTaskType(optionalString(args, "task_type"), task);
+  const taskType = normalizeTaskType(optionalString(args, "task_type"), taskWithExternalArtifacts);
   const requiredSlots = optionalStringArray(args, "required_slots").slice(0, 12);
   const qualityRubric = [
     ...optionalStringArray(args, "quality_rubric"),
@@ -626,7 +687,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
   }, mcpMode);
   const originalText = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
   const baseStrictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
-  const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, task, requiredSlots, optionalNumber(args, "budget_tokens"));
+  const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, taskWithExternalArtifacts, requiredSlots, optionalNumber(args, "budget_tokens"));
   const strictGaps = inlineEvidence.slices.length > 0 ? inlineEvidence.strictMissingSlots : baseStrictGaps;
   const effectiveAnswerable = strictGaps.length === 0 && (contextGateBaseAnswerable(result.structuredContent) || inlineEvidence.slices.length > 0);
   const refillFocusTerms = uniqueStrings([
@@ -639,7 +700,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       ? applyContextGateStrictOverride(originalText, strictGaps)
       : originalText;
   if (effectiveAnswerable) {
-    writeContextGateBrokerState(loaded, task, taskType, result.structuredContent, inlineEvidence);
+    writeContextGateBrokerState(loaded, taskWithExternalArtifacts, taskType, result.structuredContent, inlineEvidence);
   }
   const text = [
     brokerText
@@ -649,6 +710,9 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
     inlineEvidence.slices.length > 0 ? formatContextGateInlineEvidence(inlineEvidence, effectiveAnswerable) : undefined,
     "",
     "Context broker guidance:",
+    externalArtifacts.length > 0
+      ? `- External artifacts supplied: ${externalArtifacts.map(formatExternalArtifactLabel).join("; ")}. Treat those as requirement/business evidence, and use this packet for repository source-code slots.`
+      : undefined,
     "- Treat this packet as a coverage contract, not a fixed tool script.",
     effectiveAnswerable
       ? "- Broker inline evidence covers the required slots; answer from this packet and stop acquiring duplicate context."
@@ -667,6 +731,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       ...(result.structuredContent ?? {}),
       broker: "contextgate",
       requiredSlots,
+      externalArtifacts: externalArtifacts.map(slimExternalArtifact),
       strictMissingSlots: strictGaps,
       refillFocusTerms,
       inlineEvidence: slimContextGateInlineEvidence(inlineEvidence),
@@ -1629,7 +1694,9 @@ function applyContextGateStrictOverride(text: string, strictGaps: string[]): str
 }
 
 function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
-  const task = sanitizeTaskPrompt(requiredString(args, "task"));
+  const baseTask = sanitizeTaskPrompt(requiredString(args, "task"));
+  const externalArtifacts = parseExternalArtifacts(args);
+  const task = appendExternalArtifactContext(baseTask, externalArtifacts);
   const cwd = optionalString(args, "cwd") ?? process.cwd();
   const loaded = loadConfig({ cwd });
   const requestedTaskType = normalizeTaskType(optionalString(args, "task_type"), task);
@@ -1747,11 +1814,15 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
   }
 
   evidence.push({
-    id: "E4",
+    id: `E${evidence.length + 1}`,
     claim: "Likely source and test areas were inferred from bounded inventory counts.",
     facts: structureFacts,
     tokens_est: estimateTokens(structureFacts.join("\n"))
   });
+
+  if (externalArtifacts.length > 0) {
+    evidence.push(buildExternalArtifactEvidenceItem(`E${evidence.length + 1}`, externalArtifacts));
+  }
 
   const taskSpecific = compileTaskSpecificEvidence(taskType, task, loaded.repoRoot, evidence.length + 1, evidenceContext, {
     hasBuildFacts,
@@ -1769,6 +1840,11 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
   const coverage = {
     ...buildCoverage(taskType, hasBuildFacts, inventory.totalFiles > 0, Boolean(overview), structureFacts, qualityRubric),
     ...(taskSpecific?.coverage ?? {}),
+    ...(externalArtifacts.length > 0
+      ? {
+          external_requirement_artifact: "covered" as const
+        }
+      : {}),
     ...(specificity.terms.length > 0
       ? {
           target_specific_evidence: specificity.missing.length === 0 ? "covered" as const : specificity.covered.length > 0 ? "partial" as const : "missing" as const
@@ -6206,6 +6282,125 @@ function factSourceFiles(facts: string[]): string[] {
     }
   }
   return [...files].sort();
+}
+
+function parseExternalArtifacts(args: Record<string, unknown>): ExternalArtifactEvidence[] {
+  const value = args.external_artifacts;
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const artifacts: ExternalArtifactEvidence[] = [];
+  for (const item of value.slice(0, 8)) {
+    if (!isRecord(item)) {
+      continue;
+    }
+    const artifact: ExternalArtifactEvidence = {
+      source: normalizeExternalArtifactSource(item.source)
+    };
+    const id = cleanExternalArtifactValue(item.id, 160);
+    const title = cleanExternalArtifactValue(item.title, 240);
+    const url = cleanExternalArtifactValue(item.url, 300);
+    const summary = cleanExternalArtifactValue(item.summary, 1200);
+    const text = cleanExternalArtifactValue(item.text, 2400);
+    if (id) artifact.id = id;
+    if (title) artifact.title = title;
+    if (url) artifact.url = url;
+    if (summary) artifact.summary = summary;
+    if (text) artifact.text = text;
+    if (artifact.id || artifact.title || artifact.url || artifact.summary || artifact.text) {
+      artifacts.push(artifact);
+    }
+  }
+  return artifacts;
+}
+
+function normalizeExternalArtifactSource(value: unknown): ExternalArtifactEvidence["source"] {
+  return value === "jira" ||
+    value === "confluence" ||
+    value === "github" ||
+    value === "attachment" ||
+    value === "other"
+    ? value
+    : "other";
+}
+
+function cleanExternalArtifactValue(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const cleaned = value.replace(/\s+/g, " ").replace(/[`\u0000-\u001f]/g, "").trim();
+  return cleaned ? cleaned.slice(0, maxChars) : undefined;
+}
+
+function appendExternalArtifactContext(task: string, artifacts: ExternalArtifactEvidence[]): string {
+  if (artifacts.length === 0 || /External artifact evidence from other MCPs:/i.test(task)) {
+    return task;
+  }
+  return [
+    task,
+    "",
+    "External artifact evidence from other MCPs:",
+    ...artifacts.flatMap((artifact, index) => formatExternalArtifactTaskLines(artifact, index + 1))
+  ].join("\n");
+}
+
+function formatExternalArtifactTaskLines(artifact: ExternalArtifactEvidence, index: number): string[] {
+  return [
+    `Artifact ${index}: source=${artifact.source}${artifact.id ? ` id=${artifact.id}` : ""}${artifact.title ? ` title=${artifact.title}` : ""}`,
+    artifact.url ? `url=${artifact.url}` : undefined,
+    artifact.summary ? `summary=${artifact.summary}` : undefined,
+    artifact.text ? `text=${artifact.text}` : undefined
+  ].filter((line): line is string => Boolean(line));
+}
+
+function buildExternalArtifactEvidenceItem(id: string, artifacts: ExternalArtifactEvidence[]): EvidenceItem {
+  const labels = artifacts.map(formatExternalArtifactLabel);
+  const terms = extractExternalArtifactTerms(artifacts);
+  return {
+    id,
+    claim: "External MCP artifacts were supplied as requirement/business evidence; TokenOpt gates only the repository source-code slots that remain.",
+    facts: [
+      `external_artifact_count=${artifacts.length}`,
+      `external_artifacts=${labels.join(" | ")}`,
+      `external_terms=${terms.join(",") || "none_detected"}`,
+      "external_source_policy=do_not_refetch_with_shell; bind these artifacts to impacted files/symbols/tests through ContextGate evidence"
+    ],
+    tokens_est: estimateTokens(labels.join("\n") + "\n" + terms.join(","))
+  };
+}
+
+function formatExternalArtifactLabel(artifact: ExternalArtifactEvidence): string {
+  return [
+    artifact.source,
+    artifact.id,
+    artifact.title
+  ].filter(Boolean).join(":") || artifact.source;
+}
+
+function slimExternalArtifact(artifact: ExternalArtifactEvidence): Record<string, unknown> {
+  return {
+    source: artifact.source,
+    id: artifact.id,
+    title: artifact.title,
+    url: artifact.url,
+    summaryChars: artifact.summary?.length ?? 0,
+    textChars: artifact.text?.length ?? 0,
+    terms: extractExternalArtifactTerms([artifact]).slice(0, 12)
+  };
+}
+
+function extractExternalArtifactTerms(artifacts: ExternalArtifactEvidence[]): string[] {
+  const text = artifacts
+    .flatMap((artifact) => [artifact.id, artifact.title, artifact.summary, artifact.text])
+    .filter((value): value is string => Boolean(value))
+    .join("\n");
+  return selectExactFlowSearchTerms([
+    ...extractQuotedTerms(text),
+    ...extractStrongCodeLikeTaskTerms(text),
+    ...extractHyphenatedIdentifierVariants(text),
+    ...extractRouteTerms(text),
+    ...extractCodeLikeTaskTerms(text)
+  ]).slice(0, 36);
 }
 
 function normalizeEvidenceDetail(value: string | undefined): EvidenceDetail {
