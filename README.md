@@ -28,8 +28,8 @@ node dist/cli.js doctor
 ```text
 tokenopt init
 tokenopt install codex --scope user|repo
-tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command]
-tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command]
+tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
 tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
 tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
 tokenopt exec -- <command...>
@@ -108,7 +108,7 @@ Full mode also exposes the regex-lite Coding Coverage Layer. For `implement`, `w
 
 TokenOpt is meant to sit behind normal developer prompts and installed repo/agent instructions. Users should not need to write "use TokenOpt" or "use CodeGraph" in every request.
 
-For Copilot, `tokenopt setup copilot --scope both` installs the instruction/prompt layer and TokenOpt MCP config. To let those same natural prompts use CodeGraph evidence too, run setup with CodeGraph enabled:
+For Copilot, `tokenopt setup copilot --scope both` installs the instruction/prompt layer, Copilot CLI MCP config, and VS Code workspace MCP config. To let those same natural prompts use CodeGraph evidence too, run setup with CodeGraph enabled:
 
 ```powershell
 node dist\cli.js setup copilot --scope both --include-codegraph --codegraph-root D:\Personal\Projects\code-graph
@@ -116,6 +116,8 @@ node dist\cli.js doctor copilot
 ```
 
 Then a daily prompt like "review this PR" should remain a normal review prompt. The installed instructions decide whether the cheapest evidence path is `contextgate_get_context`, `tokenopt_compile_evidence`, `codegraph_context`, exact source reads, or asking for a missing artifact.
+
+VS Code Copilot Agent does not read `<home>/.copilot/mcp-config.json`; that file is for Copilot CLI. VS Code reads `.vscode/mcp.json` or the VS Code user-profile `mcp.json`. After setup, run `MCP: List Servers` in VS Code, start `tokenopt` and `codegraph`, then confirm their tools are enabled in the chat Configure Tools picker.
 
 | Lifecycle step | Evidence route | Output contract |
 | --- | --- | --- |
@@ -162,7 +164,7 @@ node <tokenopt-repo>\dist\cli.js setup copilot --scope both
 node <tokenopt-repo>\dist\cli.js doctor copilot
 ```
 
-This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, `.github/prompts/*.prompt.md`, and merges a lite `tokenopt` stdio MCP server into `<home>/.copilot/mcp-config.json` using `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions + native prompt files today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
+This installs `.github/copilot-instructions.md`, `.github/instructions/tokenopt.instructions.md`, `.github/agents/tokenopt-cost-gate.agent.md`, `AGENTS.md`, `.github/prompts/*.prompt.md`, merges a lite `tokenopt` server into `<home>/.copilot/mcp-config.json` for Copilot CLI, and writes `.vscode/mcp.json` for VS Code Copilot Agent. Both local configs use `node <absolute-tokenopt-cli-js> mcp --mode lite`. It does not install Copilot hooks yet; TokenOpt's Copilot integration is MCP + instructions + native prompt files today. Add `--include-run-command` only for repos where Copilot should run builds/tests through TokenOpt MCP.
 
 After setup, use Copilot/Codex normally. In Copilot UI, call native slash prompts such as `/investigate-flow <area>`, `/e2e-trace-flow <endpoint>`, `/bug-trace <failing test or stack frame>`, `/write-unittest-class OrderService payment authorization`, `/investigate-pbi <PBI>`, `/review-code <diff>`, or `/security-audit <diff or PR scope>`. In Codex, type natural tasks; `AGENTS.md` carries the routing rules.
 

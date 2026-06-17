@@ -42,6 +42,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
   const copilotAgentPath = path.join(loaded.repoRoot, ".github", "agents", "tokenopt-cost-gate.agent.md");
   const agentsPath = path.join(loaded.repoRoot, "AGENTS.md");
   const mcpConfigPath = getCopilotMcpConfigPath();
+  const vscodeMcpConfigPath = path.join(loaded.repoRoot, ".vscode", "mcp.json");
   const checks = [
     check("node", process.version, true),
     check("tokenopt cli", getDefaultTokenOptCliPath(), fs.existsSync(getDefaultTokenOptCliPath())),
@@ -50,8 +51,11 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     check("repo Copilot custom agent", copilotAgentPath, fs.existsSync(copilotAgentPath)),
     check("repo AGENTS.md", agentsPath, fs.existsSync(agentsPath)),
     check("user Copilot MCP config", mcpConfigPath, fs.existsSync(mcpConfigPath)),
+    check("VS Code workspace MCP config", vscodeMcpConfigPath, fs.existsSync(vscodeMcpConfigPath)),
     ...inspectCopilotMcpConfig(mcpConfigPath),
-    ...inspectCopilotCodeGraphMcpConfig(mcpConfigPath)
+    ...inspectCopilotCodeGraphMcpConfig(mcpConfigPath),
+    ...inspectVsCodeTokenOptMcpConfig(vscodeMcpConfigPath),
+    ...inspectVsCodeCodeGraphMcpConfig(vscodeMcpConfigPath)
   ];
 
   return [
@@ -61,6 +65,7 @@ export function runCopilotDoctor(loaded: LoadedConfig): string {
     "",
     "Copilot CLI verification: open the target repo and run `/mcp show tokenopt`.",
     "CodeGraph verification: if graph evidence is expected, run `/mcp show codegraph` too.",
+    "VS Code Copilot Agent verification: run MCP: List Servers, start tokenopt/codegraph, and enable their tools in the chat Configure Tools picker.",
     "GitHub.com cloud agent/code review: configure MCP JSON in Repository -> Settings -> Copilot -> MCP servers; local Windows paths do not work there.",
     "Copilot hooks are not installed by TokenOpt yet; use MCP + instructions for Copilot today."
   ].join("\n");
@@ -144,6 +149,66 @@ function inspectCopilotCodeGraphMcpConfig(filePath: string): Array<{ name: strin
       missingTools.length === 0 ? tools.join(",") : `missing ${missingTools.join(",")}`,
       missingTools.length === 0
     )
+  ];
+}
+
+function inspectVsCodeTokenOptMcpConfig(filePath: string): Array<{ name: string; detail: string; ok: boolean }> {
+  if (!fs.existsSync(filePath)) {
+    return [
+      check("VS Code tokenopt MCP server", "missing; run tokenopt setup copilot --scope repo or --scope both", false)
+    ];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch (error) {
+    return [
+      check("VS Code tokenopt MCP server", `invalid JSON: ${error instanceof Error ? error.message : String(error)}`, false)
+    ];
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.servers)) {
+    return [
+      check("VS Code tokenopt MCP server", "servers object missing", false)
+    ];
+  }
+  const server = parsed.servers.tokenopt;
+  if (!isRecord(server)) {
+    return [
+      check("VS Code tokenopt MCP server", "tokenopt entry missing", false)
+    ];
+  }
+  const args = Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [];
+  const mode = inferCopilotMcpMode(server, args);
+  return [
+    check("VS Code tokenopt MCP command", String(server.command ?? "missing"), server.command === "node"),
+    check("VS Code tokenopt MCP args", args.join(" "), args.some((arg) => /cli\.js$/i.test(arg)) && args.includes("mcp")),
+    check("VS Code tokenopt MCP mode", mode, true)
+  ];
+}
+
+function inspectVsCodeCodeGraphMcpConfig(filePath: string): Array<{ name: string; detail: string; ok: boolean }> {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return [];
+  }
+  if (!isRecord(parsed) || !isRecord(parsed.servers)) {
+    return [];
+  }
+  const server = parsed.servers.codegraph;
+  if (!isRecord(server)) {
+    return [
+      check("VS Code codegraph MCP server", "missing; rerun setup with --include-codegraph and --codegraph-root/--codegraph-cli when graph evidence is expected", false)
+    ];
+  }
+  const args = Array.isArray(server.args) ? server.args.filter((arg): arg is string => typeof arg === "string") : [];
+  return [
+    check("VS Code codegraph MCP command", String(server.command ?? "missing"), server.command === "node"),
+    check("VS Code codegraph MCP args", args.join(" "), args.some((arg) => /cli\.js$/i.test(arg)) && args.includes("mcp"))
   ];
 }
 

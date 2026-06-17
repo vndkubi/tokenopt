@@ -132,6 +132,8 @@ Running install again updates the existing block instead of appending duplicates
 
 Copilot may ignore MCP unless the relevant instruction/custom-agent files are loaded for the current surface. After setup, verify Copilot references `.github/copilot-instructions.md` or `.github/instructions/tokenopt.instructions.md`, and verify the custom agent appears in Copilot CLI with `/agent` when that surface supports project custom agents.
 
+VS Code Copilot Agent uses `.vscode/mcp.json` or a VS Code user-profile `mcp.json`, not `<home>/.copilot/mcp-config.json`. `tokenopt setup copilot --scope repo|both` writes the workspace `.vscode/mcp.json`; after setup, run `MCP: List Servers`, start `tokenopt` and `codegraph`, and enable their tools from the chat Configure Tools picker.
+
 Daily prompts should stay natural. You should not have to write "use TokenOpt" or "use CodeGraph" in normal prompts such as "review this PR", "investigate this PBI", or "write tests for this behavior". The installed instruction layer maps those prompts to the evidence route.
 
 If you also want CodeGraph evidence in Copilot, configure it during setup:
@@ -259,6 +261,7 @@ Current support:
 - Codex hook adapter/install: implemented.
 - Codex CLI benchmark runner: implemented.
 - Copilot local CLI setup: `tokenopt setup copilot --scope user|repo|both`
+- VS Code Copilot Agent workspace MCP setup: `.vscode/mcp.json`
 - Copilot instruction install: `.github/copilot-instructions.md`
 - Copilot path instruction install: `.github/instructions/tokenopt.instructions.md`
 - Copilot custom agent install: `.github/agents/tokenopt-cost-gate.agent.md`

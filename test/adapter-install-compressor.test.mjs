@@ -234,6 +234,8 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   const traceBugPrompt = fs.readFileSync(path.join(repo, ".github", "prompts", "trace-bug.prompt.md"), "utf8");
   const agentsInstructions = fs.readFileSync(path.join(repo, "AGENTS.md"), "utf8");
   const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf8"));
+  const vscodeConfigPath = path.join(repo, ".vscode", "mcp.json");
+  const vscodeConfig = JSON.parse(fs.readFileSync(vscodeConfigPath, "utf8"));
 
   assert.equal((copilotInstructions.match(/tokenopt:mcp-instructions:start/g) ?? []).length, 1);
   assert.match(copilotPathInstructions, /applyTo: "\*\*"/);
@@ -253,6 +255,12 @@ test("Copilot setup writes repo guidance and merges user MCP config", () => {
   assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_run_command"));
   assert.ok(!config.mcpServers.tokenopt.tools.includes("tokenopt_project_facts"));
   assert.doesNotMatch(JSON.stringify(config.mcpServers.tokenopt), /\bnpm(?:\.cmd|\.ps1)?\b/i);
+  assert.equal(result.vscodeMcpConfigPath, vscodeConfigPath);
+  assert.ok(result.files.includes(vscodeConfigPath));
+  assert.equal(vscodeConfig.servers.tokenopt.type, "stdio");
+  assert.equal(vscodeConfig.servers.tokenopt.command, "node");
+  assert.deepEqual(vscodeConfig.servers.tokenopt.args, [tokenoptCliPath.replace(/\\/g, "/"), "mcp", "--mode", "lite"]);
+  assert.doesNotMatch(JSON.stringify(vscodeConfig.servers.tokenopt), /\bnpm(?:\.cmd|\.ps1)?\b/i);
   assert.ok(result.warnings.some((warning) => /lite mode/i.test(warning)));
   assert.ok(result.warnings.some((warning) => /hooks were not installed/i.test(warning)));
 });
@@ -268,7 +276,7 @@ test("Copilot setup configures CodeGraph MCP when a CodeGraph root is provided",
 
   const result = setupCopilotProject({
     repoRoot: repo,
-    scope: "user",
+    scope: "both",
     installAgents: false,
     installPrompts: false,
     copilotConfigPath,
@@ -278,6 +286,7 @@ test("Copilot setup configures CodeGraph MCP when a CodeGraph root is provided",
   });
 
   const config = JSON.parse(fs.readFileSync(copilotConfigPath, "utf8"));
+  const vscodeConfig = JSON.parse(fs.readFileSync(path.join(repo, ".vscode", "mcp.json"), "utf8"));
   assert.equal(result.codeGraphConfigured, true);
   assert.equal(config.mcpServers.codegraph.command, "node");
   assert.deepEqual(config.mcpServers.codegraph.args, [
@@ -294,6 +303,18 @@ test("Copilot setup configures CodeGraph MCP when a CodeGraph root is provided",
     "codegraph_context",
     "codegraph_slice",
     "codegraph_status"
+  ]);
+  assert.equal(vscodeConfig.servers.codegraph.type, "stdio");
+  assert.equal(vscodeConfig.servers.codegraph.command, "node");
+  assert.deepEqual(vscodeConfig.servers.codegraph.args, [
+    codeGraphCli.replace(/\\/g, "/"),
+    "mcp",
+    "--root",
+    repo.replace(/\\/g, "/"),
+    "--workspace-key",
+    repo.replace(/\\/g, "/"),
+    "--mcp-profile",
+    "client"
   ]);
 });
 

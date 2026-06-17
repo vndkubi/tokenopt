@@ -31,6 +31,7 @@ export interface CopilotSetupOptions {
   installAgents?: boolean;
   tokenoptCliPath?: string;
   copilotConfigPath?: string;
+  vscodeMcpConfigPath?: string;
   includeRunCommand?: boolean;
   installPrompts?: boolean;
   includeCodeGraph?: boolean;
@@ -44,6 +45,7 @@ export interface CopilotSetupResult {
   warnings: string[];
   nextSteps: string[];
   mcpConfigPath?: string;
+  vscodeMcpConfigPath?: string;
   copilotInstructionsPath: string;
   copilotPathInstructionsPath: string;
   agentsPath?: string;
@@ -101,6 +103,17 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
   }
 
   if (scope === "repo" || scope === "both") {
+    const vscodeMcpConfigPath = installVsCodeWorkspaceMcpConfig({
+      repoRoot,
+      configPath: options.vscodeMcpConfigPath,
+      tokenoptCliPath: options.tokenoptCliPath,
+      includeRunCommand,
+      includeCodeGraph: options.includeCodeGraph,
+      codeGraphCliPath: options.codeGraphCliPath,
+      codeGraphRoot: options.codeGraphRoot
+    });
+    files.push(vscodeMcpConfigPath);
+    nextSteps.push("For VS Code Copilot Agent, run MCP: List Servers, start tokenopt/codegraph, and enable their tools in the chat tool picker.");
     nextSteps.push("For GitHub.com cloud agent/code review, paste a cloud-compatible MCP JSON into Repository -> Settings -> Copilot -> MCP servers.");
   }
 
@@ -118,10 +131,11 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     codeGraphCliPath: options.codeGraphCliPath,
     codeGraphRoot: options.codeGraphRoot
   });
-  const codeGraphConfigured = (scope === "user" || scope === "both") && options.includeCodeGraph !== false && Boolean(codeGraphResolution?.cliPath);
-  if ((scope === "user" || scope === "both") && options.includeCodeGraph === true && !codeGraphResolution?.cliPath) {
+  const writesLocalMcpConfig = scope === "user" || scope === "repo" || scope === "both";
+  const codeGraphConfigured = writesLocalMcpConfig && options.includeCodeGraph !== false && Boolean(codeGraphResolution?.cliPath);
+  if (writesLocalMcpConfig && options.includeCodeGraph === true && !codeGraphResolution?.cliPath) {
     warnings.push("CodeGraph MCP was requested but no CLI was found. Set TOKENOPT_CODEGRAPH_ROOT, TOKENOPT_CODEGRAPH_CLI, --codegraph-root, or --codegraph-cli.");
-  } else if ((scope === "user" || scope === "both") && !codeGraphConfigured) {
+  } else if (writesLocalMcpConfig && !codeGraphConfigured) {
     warnings.push("CodeGraph MCP was not configured. Natural prompts can still use TokenOpt, but graph/source evidence requires --include-codegraph plus a CodeGraph CLI/root.");
   }
   warnings.push("Copilot hooks were not installed. TokenOpt does not ship a Copilot hook adapter yet; use MCP + instructions for Copilot today.");
@@ -132,6 +146,9 @@ export function setupCopilotProject(options: CopilotSetupOptions): CopilotSetupR
     warnings,
     nextSteps,
     mcpConfigPath,
+    vscodeMcpConfigPath: scope === "repo" || scope === "both"
+      ? path.resolve(options.vscodeMcpConfigPath ?? path.join(repoRoot, ".vscode", "mcp.json"))
+      : undefined,
     copilotInstructionsPath,
     copilotPathInstructionsPath,
     agentsPath,
@@ -197,6 +214,64 @@ export function installCopilotUserMcpConfig(options: {
   const next = {
     ...config,
     mcpServers
+  };
+
+  fs.mkdirSync(path.dirname(configPath), { recursive: true });
+  fs.writeFileSync(configPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
+  return configPath;
+}
+
+export function installVsCodeWorkspaceMcpConfig(options: {
+  repoRoot: string;
+  configPath?: string;
+  tokenoptCliPath?: string;
+  includeRunCommand?: boolean;
+  includeCodeGraph?: boolean;
+  codeGraphCliPath?: string;
+  codeGraphRoot?: string;
+}): string {
+  const repoRoot = path.resolve(options.repoRoot);
+  const configPath = path.resolve(options.configPath ?? path.join(repoRoot, ".vscode", "mcp.json"));
+  const tokenoptCliPath = normalizeJsonPath(path.resolve(options.tokenoptCliPath ?? getDefaultTokenOptCliPath()));
+  const includeRunCommand = options.includeRunCommand ?? false;
+  const mode = includeRunCommand ? "full" : "lite";
+  const config = readJsonObject(configPath);
+  const servers = isRecord(config.servers) ? { ...config.servers } : {};
+
+  servers.tokenopt = {
+    type: "stdio",
+    command: "node",
+    args: [tokenoptCliPath, "mcp", "--mode", mode]
+  };
+
+  if (options.includeCodeGraph !== false) {
+    const codeGraph = resolveCodeGraphCli({
+      repoRoot,
+      codeGraphCliPath: options.codeGraphCliPath,
+      codeGraphRoot: options.codeGraphRoot
+    });
+    if (codeGraph?.cliPath) {
+      const normalizedRepoRoot = normalizeJsonPath(repoRoot);
+      servers.codegraph = {
+        type: "stdio",
+        command: "node",
+        args: [
+          normalizeJsonPath(codeGraph.cliPath),
+          "mcp",
+          "--root",
+          normalizedRepoRoot,
+          "--workspace-key",
+          normalizedRepoRoot,
+          "--mcp-profile",
+          "client"
+        ]
+      };
+    }
+  }
+
+  const next = {
+    ...config,
+    servers
   };
 
   fs.mkdirSync(path.dirname(configPath), { recursive: true });

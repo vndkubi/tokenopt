@@ -1063,8 +1063,11 @@ Expected setup files:
 .github/copilot-instructions.md
 .github/instructions/tokenopt.instructions.md
 .github/agents/tokenopt-cost-gate.agent.md
+.vscode/mcp.json
 AGENTS.md
 ```
+
+If you are using VS Code Copilot Agent, `/mcp show` is not the right verification path. Run `MCP: List Servers`, start `tokenopt` and `codegraph`, then use the chat Configure Tools picker to confirm `contextgate_get_context`, `tokenopt_compile_evidence`, `codegraph_context`, and `codegraph_slice` are visible and enabled. VS Code reads `.vscode/mcp.json` with a top-level `servers` object; Copilot CLI reads `<home>/.copilot/mcp-config.json` with `mcpServers`.
 
 If `codegraph` is missing, configure it without changing the daily prompt:
 
@@ -1108,3 +1111,5 @@ Instructions and Copilot custom agents are soft routing signals. For strict Toke
 - GitHub Copilot custom agents: <https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/customize-cloud-agent/create-custom-agents>
 - GitHub Copilot custom agent configuration: <https://docs.github.com/en/copilot/reference/custom-agents-configuration>
 - GitHub Copilot MCP setup: <https://docs.github.com/en/enterprise-cloud@latest/copilot/how-tos/copilot-cli/customize-copilot/add-mcp-servers>
+- VS Code MCP servers: <https://code.visualstudio.com/docs/agent-customization/mcp-servers>
+- VS Code MCP configuration reference: <https://code.visualstudio.com/docs/agents/reference/mcp-configuration>

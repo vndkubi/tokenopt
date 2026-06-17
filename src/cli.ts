@@ -82,6 +82,7 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
         scope: options.scope,
         files: result.files,
         mcpConfigPath: result.mcpConfigPath,
+        vscodeMcpConfigPath: result.vscodeMcpConfigPath,
         installAgents: options.installAgents,
         installPrompts: options.installPrompts,
         includeRunCommand: options.includeRunCommand,
@@ -294,6 +295,7 @@ function parseCopilotSetupOptions(args: string[]): {
   installAgents: boolean;
   installPrompts: boolean;
   tokenoptCliPath?: string;
+  vscodeMcpConfigPath?: string;
   includeRunCommand: boolean;
   includeCodeGraph?: boolean;
   codeGraphCliPath?: string;
@@ -305,6 +307,7 @@ function parseCopilotSetupOptions(args: string[]): {
   let includeRunCommand = false;
   let includeCodeGraph: boolean | undefined;
   let tokenoptCliPath: string | undefined;
+  let vscodeMcpConfigPath: string | undefined;
   let codeGraphCliPath: string | undefined;
   let codeGraphRoot: string | undefined;
 
@@ -341,6 +344,15 @@ function parseCopilotSetupOptions(args: string[]): {
         throw new Error("--tokenopt-path requires a path");
       }
       tokenoptCliPath = value;
+      index += 1;
+      continue;
+    }
+    if (arg === "--vscode-mcp-config") {
+      const value = args[index + 1];
+      if (!value) {
+        throw new Error("--vscode-mcp-config requires a path");
+      }
+      vscodeMcpConfigPath = value;
       index += 1;
       continue;
     }
@@ -383,7 +395,7 @@ function parseCopilotSetupOptions(args: string[]): {
     throw new Error(`Unknown Copilot setup option: ${arg}`);
   }
 
-  return { scope, installAgents, installPrompts, tokenoptCliPath, includeRunCommand, includeCodeGraph, codeGraphCliPath, codeGraphRoot };
+  return { scope, installAgents, installPrompts, tokenoptCliPath, vscodeMcpConfigPath, includeRunCommand, includeCodeGraph, codeGraphCliPath, codeGraphRoot };
 }
 
 function parseMcpMode(args: string[]): "lite" | "full" | "broker" | undefined {
@@ -415,6 +427,8 @@ function formatCopilotSetupResult(result: {
   files: string[];
   warnings: string[];
   nextSteps: string[];
+  mcpConfigPath?: string;
+  vscodeMcpConfigPath?: string;
   codeGraphConfigured?: boolean;
   codeGraphCliPath?: string;
 }): string {
@@ -423,6 +437,8 @@ function formatCopilotSetupResult(result: {
     "",
     `repo: ${result.repoRoot}`,
     `codegraph: ${result.codeGraphConfigured ? `configured (${result.codeGraphCliPath ?? "detected"})` : "not configured"}`,
+    `copilot cli mcp: ${result.mcpConfigPath ?? "not written"}`,
+    `vs code mcp: ${result.vscodeMcpConfigPath ?? "not written"}`,
     "",
     "files:",
     ...result.files.map((filePath) => `- ${filePath}`),
@@ -442,8 +458,8 @@ function helpText(): string {
 Commands:
   tokenopt init
   tokenopt install codex --scope user|repo
-  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
-  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+  tokenopt setup copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
+  tokenopt install copilot --scope user|repo|both [--no-agents] [--no-prompts] [--include-run-command] [--vscode-mcp-config <path>] [--include-codegraph --codegraph-root <path>|--codegraph-cli <path>]
   tokenopt hook codex user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt hook copilot user-prompt-submit|pre-tool-use|post-tool-use|pre-compact
   tokenopt exec -- <command...>

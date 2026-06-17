@@ -1,0 +1,28 @@
+{
+  "servers": {
+    "tokenopt": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "D:/Personal/Projects/tokenopt/dist/cli.js",
+        "mcp",
+        "--mode",
+        "lite"
+      ]
+    },
+    "codegraph": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "D:/Personal/Projects/code-graph/dist/cli.js",
+        "mcp",
+        "--root",
+        "D:/Personal/Projects/tokenopt",
+        "--workspace-key",
+        "D:/Personal/Projects/tokenopt",
+        "--mcp-profile",
+        "client"
+      ]
+    }
+  }
+}

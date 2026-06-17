@@ -27,7 +27,8 @@ Not implemented yet:
 
 | Surface | Needed? | TokenOpt setup |
 | --- | --- | --- |
-| MCP server | Yes | `tokenopt setup copilot --scope user` merges `tokenopt` into `<home>/.copilot/mcp-config.json`. |
+| Copilot CLI MCP server | Yes for Copilot CLI | `tokenopt setup copilot --scope user` merges `tokenopt` into `<home>/.copilot/mcp-config.json`. |
+| VS Code Copilot Agent MCP server | Yes for VS Code Chat/Agent | `tokenopt setup copilot --scope repo` writes `.vscode/mcp.json` with `tokenopt` and optional `codegraph` servers. |
 | Repo instructions | Yes | `tokenopt setup copilot` writes `.github/copilot-instructions.md`. |
 | Path instructions | Recommended | `tokenopt setup copilot` writes `.github/instructions/tokenopt.instructions.md` with `applyTo: "**"`. |
 | Custom agent | Recommended | `tokenopt setup copilot` writes `.github/agents/tokenopt-cost-gate.agent.md`. |
@@ -40,8 +41,8 @@ Scope meaning:
 
 ```text
 --scope user  -> repo instructions + local Copilot CLI MCP config
---scope repo  -> repo instructions only; use after user MCP is installed, or pair with GitHub.com cloud MCP settings
---scope both  -> repo instructions + local Copilot CLI MCP config + cloud setup guidance
+--scope repo  -> repo instructions + VS Code workspace MCP config; use after user MCP is installed, or pair with GitHub.com cloud MCP settings
+--scope both  -> repo instructions + local Copilot CLI MCP config + VS Code workspace MCP config + cloud setup guidance
 ```
 
 ## Prerequisites
@@ -107,10 +108,11 @@ Expected result:
 .github/prompts/write-unittest.prompt.md
 .github/prompts/promote-review-memory.prompt.md
 AGENTS.md
+.vscode/mcp.json
 <home>/.copilot/mcp-config.json
 ```
 
-`<home>/.copilot/mcp-config.json` is user-global for Copilot CLI. Once the `tokenopt` MCP server is installed there, it is available from other local repos too. The repo instruction files are still project-specific, so run `tokenopt setup copilot --scope repo` inside each project that should steer Copilot toward TokenOpt.
+`<home>/.copilot/mcp-config.json` is user-global for Copilot CLI. `.vscode/mcp.json` is workspace-local for VS Code Copilot Agent. Once the CLI `tokenopt` MCP server is installed in the user config, it is available from other local repos too. The repo instruction files and VS Code MCP config are project-specific, so run `tokenopt setup copilot --scope repo` inside each project that should steer Copilot toward TokenOpt in VS Code.
 
 Useful variants:
 
@@ -130,7 +132,7 @@ node <tokenopt-repo>\dist\cli.js setup copilot --scope user --include-run-comman
 
 After setup, use Copilot UI normally. You can type natural prompts such as `write unit tests for OrderService`, or use native prompt files from chat, for example `/investigate-flow <area>`, `/e2e-trace-flow <endpoint or UI action>`, `/bug-trace <failing test or stack frame>`, `/write-unittest-class OrderService payment authorization`, `/investigate-pbi <PBI>`, `/security-audit <diff or PR scope>`, or `/review-code <diff>`.
 
-The generated MCP entry uses:
+The generated Copilot CLI MCP entry uses:
 
 ```json
 {
@@ -141,6 +143,22 @@ The generated MCP entry uses:
 ```
 
 It deliberately avoids `npm`, `npm.ps1`, and PowerShell shims.
+
+The generated VS Code workspace MCP entry in `.vscode/mcp.json` uses VS Code's `servers` shape:
+
+```json
+{
+  "servers": {
+    "tokenopt": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["<tokenopt-repo>/dist/cli.js", "mcp", "--mode", "lite"]
+    }
+  }
+}
+```
+
+For VS Code Copilot Agent, reload VS Code or run `MCP: List Servers`, start `tokenopt` and `codegraph`, and confirm the tools are enabled from the chat Configure Tools picker. If VS Code only uses grep/search, first confirm `.vscode/mcp.json` exists and the MCP servers are enabled/trusted.
 
 ## Setup Option B: Manual Copilot CLI Local MCP
 
@@ -389,12 +407,20 @@ If Copilot cannot see TokenOpt:
 /mcp show tokenopt
 ```
 
+For VS Code Copilot Agent, use Command Palette commands instead:
+
+```text
+MCP: List Servers
+MCP: Open Workspace Folder Configuration
+```
+
 Check:
 
 - `node` is on PATH.
 - `<tokenopt-repo>/dist/cli.js` exists.
 - `npm.cmd run build` was run after code changes.
-- `mcp-config.json` is valid JSON.
+- Copilot CLI: `<home>/.copilot/mcp-config.json` is valid JSON and contains `mcpServers.tokenopt`.
+- VS Code: `.vscode/mcp.json` is valid JSON and contains `servers.tokenopt`.
 - Tool names are allowlisted correctly.
 - `.github/instructions/tokenopt.instructions.md` exists and contains `applyTo: "**"`.
 - `.github/agents/tokenopt-cost-gate.agent.md` exists if your Copilot surface supports project custom agents.
@@ -402,6 +428,7 @@ Check:
 If Copilot still uses shell too much:
 
 - Confirm `.github/copilot-instructions.md` contains the TokenOpt block.
+- In VS Code, confirm the chat Configure Tools picker lists and enables `contextgate_get_context`, `tokenopt_compile_evidence`, `codegraph_context`, and `codegraph_slice`.
 - Prompt explicitly for broad tasks: "Use TokenOpt as a cost gate; call tokenopt_compile_evidence only if it can replace broad exploration."
 - Ask it to call `tokenopt_compile_evidence` by name.
 - For existing-flow prompts in shell-enabled sessions, do not force MCP-first if the answer still needs line-level code proof. Use native narrow search/read directly, or run a strict MCP-only session.
@@ -414,3 +441,5 @@ If Copilot still uses shell too much:
 - GitHub Copilot custom instructions: <https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions>
 - GitHub Copilot repository MCP config: <https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers>
 - GitHub Copilot hooks reference: <https://docs.github.com/en/copilot/reference/hooks-reference>
+- VS Code MCP servers: <https://code.visualstudio.com/docs/agent-customization/mcp-servers>
+- VS Code MCP configuration reference: <https://code.visualstudio.com/docs/agents/reference/mcp-configuration>
