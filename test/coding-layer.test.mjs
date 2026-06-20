@@ -5,13 +5,15 @@ import path from "node:path";
 import test from "node:test";
 import { compileCodingCoverageEvidence } from "../dist/coding/coverage-contract.js";
 import { parseFailurePacket } from "../dist/coding/failure-packet.js";
-import { buildSymbolPacket, findCodingSymbols, getCodingSymbolIndexStats } from "../dist/coding/symbol-index.js";
+import { buildSymbolPacket, findCodingSymbols, findCodingSymbolsWithStats, getCodingSymbolIndexStats } from "../dist/coding/symbol-index.js";
 import { findTestNeighbors } from "../dist/coding/test-neighbors.js";
 
 function makeCodingFixture() {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-coding-fixture-"));
   fs.mkdirSync(path.join(repo, "src", "orders"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "src", "benchmark"), { recursive: true });
   fs.mkdirSync(path.join(repo, "test", "orders"), { recursive: true });
+  fs.mkdirSync(path.join(repo, "test", "benchmark"), { recursive: true });
   fs.mkdirSync(path.join(repo, "backend", "src", "main", "java", "com", "acme"), { recursive: true });
   fs.mkdirSync(path.join(repo, "pkg"), { recursive: true });
   fs.writeFileSync(
@@ -46,6 +48,26 @@ function makeCodingFixture() {
       "  });",
       "});"
     ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "src", "benchmark", "suite-benchmark.ts"),
+    [
+      "export function buildSuitePrompt(): string {",
+      "  return naturalTokenOptCodeGraphPlanLines().join('\\n');",
+      "}",
+      "",
+      "export function naturalTokenOptCodeGraphPlanLines(): string[] {",
+      "  return ['preserve business coverage validation'];",
+      "}",
+      "",
+      "export function naturalTaskWantsTestEvidence(): boolean {",
+      "  return true;",
+      "}"
+    ].join("\n")
+  );
+  fs.writeFileSync(
+    path.join(repo, "test", "benchmark", "suite-benchmark-metadata.test.ts"),
+    "import { buildSuitePrompt } from '../../src/benchmark/suite-benchmark';\nit('keeps benchmark prompt contract', () => expect(buildSuitePrompt()).toContain('validation'));\n"
   );
   fs.writeFileSync(
     path.join(repo, "backend", "src", "main", "java", "com", "acme", "PaymentGateway.java"),
@@ -117,6 +139,17 @@ test("persistent symbol index reuses cache and rebuilds after source changes", (
   assert.ok(rebuilt.symbolCount > first.symbolCount);
 });
 
+test("symbol search returns cache-hit metadata without a second index load", () => {
+  const repo = makeCodingFixture();
+  const first = findCodingSymbolsWithStats({ repoRoot: repo, query: "OrderService authorizePayment" });
+  assert.equal(first.indexStats.cacheHit, false);
+  assert.ok(first.symbols.length > 0);
+
+  const second = findCodingSymbolsWithStats({ repoRoot: repo, query: "OrderService authorizePayment" });
+  assert.equal(second.indexStats.cacheHit, true);
+  assert.equal(second.indexStats.symbolCount, first.indexStats.symbolCount);
+});
+
 test("symbol packet includes definition, dependencies, callers, callees, and nearby tests", () => {
   const repo = makeCodingFixture();
   const packet = buildSymbolPacket({ repoRoot: repo, query: "OrderService" });
@@ -163,5 +196,34 @@ test("coding coverage contract prevents early answerability when exact coverage 
   assert.ok(result);
   assert.equal(result.answerable, false);
   assert.equal(result.coverage.target_symbol, "missing");
+  assert.equal(result.metadata.symbol_index_hit, false);
+  assert.equal(typeof result.metadata.symbol_index_symbol_count, "number");
+  assert.equal(result.contract.metadata.symbol_index_hit, false);
   assert.equal(result.allowedFollowups.some((followup) => followup.tool === "tokenopt_symbols_find"), true);
+});
+
+test("coding coverage uses quality rubric anchors for symbol discovery", () => {
+  const repo = makeCodingFixture();
+  const result = compileCodingCoverageEvidence({
+    repoRoot: repo,
+    task: "Create an implementation handoff for improving natural benchmark prompt quality.",
+    taskType: "implement",
+    qualityRubric: [
+      'Verify anchor file: "src/benchmark/suite-benchmark.ts"',
+      'Verify anchor symbol: "naturalTokenOptCodeGraphPlanLines"',
+      'Verify anchor symbol: "naturalTaskWantsTestEvidence"',
+      'Verify anchor symbol: "buildSuitePrompt"',
+      'Verify anchor file: "test/benchmark/suite-benchmark-metadata.test.ts"'
+    ],
+    firstEvidenceIndex: 5,
+    hasBuildFacts: true,
+    codingToolsAvailable: true
+  });
+  assert.ok(result);
+  assert.equal(result.evidence.some((item) =>
+    item.facts?.some((fact) => fact.includes("naturalTokenOptCodeGraphPlanLines") && fact.includes("buildSuitePrompt"))
+  ), true);
+  assert.equal(result.evidence.some((item) =>
+    item.files?.some((file) => file === "test/benchmark/suite-benchmark-metadata.test.ts")
+  ), true);
 });

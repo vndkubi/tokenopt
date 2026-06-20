@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { routeTask } from "./router.js";
-import type { AcquisitionMode, EvidenceContractName, EvidenceTaskType } from "./types.js";
+import type { AcquisitionMode, EvidenceContractName, EvidenceTaskType, TaskClass } from "./types.js";
 
 type SuiteBenchmarkMode =
   | "baseline"
@@ -105,6 +105,12 @@ interface SuiteBenchmarkRow extends CodexRunMetrics {
   evidenceContractPass: boolean;
   fallbackReason: string;
   doubleSpend: boolean;
+  expectedTaskClass: TaskClass;
+  actualTaskClass: TaskClass;
+  routeCorrect: boolean;
+  routeRegretReason: string;
+  negativeControlTriggered: boolean;
+  fallbackAfterAnswerable: number;
   mode: SuiteBenchmarkMode;
   prompt: string;
   codexPrompt: string;
@@ -189,6 +195,7 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
         mcpCalls: run.mcpCalls,
         shellCalls: run.shellCalls
       });
+      const routeCalibration = buildSuiteRouteCalibration(item.task, inferTaskType(item.task), routeMetadata);
       rows.push({
         ...run,
         repo: item.repo,
@@ -200,6 +207,12 @@ export async function runSuiteBenchmarkCommand(args: string[]): Promise<number> 
         evidenceContractPass: routeMetadata.evidenceContractPass,
         fallbackReason: routeMetadata.fallbackReason,
         doubleSpend: routeMetadata.doubleSpend,
+        expectedTaskClass: routeCalibration.expectedTaskClass,
+        actualTaskClass: routeCalibration.actualTaskClass,
+        routeCorrect: routeCalibration.routeCorrect,
+        routeRegretReason: routeCalibration.routeRegretReason,
+        negativeControlTriggered: routeCalibration.negativeControlTriggered,
+        fallbackAfterAnswerable: routeCalibration.fallbackAfterAnswerable,
         mode,
         prompt: item.task.prompt,
         codexPrompt,
@@ -947,8 +960,16 @@ const ANCHOR_QUERY_STOP_WORDS = new Set([
   "with"
 ]);
 
+function stripSuiteOutputContractText(text: string): string {
+  const outputContract = /Return\s+(?:valid\s+)?(?:compact\s+)?JSON\s+(?:only\s+)?with\s+keys:?\s+[^.?!]+[.?!]?/i;
+  return text
+    .replace(new RegExp(`^\\s*${outputContract.source}\\s*`, "i"), "")
+    .replace(new RegExp(`\\s*${outputContract.source}\\s*$`, "i"), "")
+    .trim();
+}
+
 export function buildCodeGraphAnchorQueryForTask(task: { prompt: string; qualityRubric?: string[] }): string {
-  const promptWithoutOutputContract = task.prompt.replace(/\bReturn valid compact JSON only with keys:[\s\S]*$/i, "");
+  const promptWithoutOutputContract = stripSuiteOutputContractText(task.prompt);
   const text = [promptWithoutOutputContract, ...(task.qualityRubric ?? [])].join(" ");
   const lower = text.toLowerCase();
   const terms: string[] = [];
@@ -1263,6 +1284,7 @@ function naturalTokenOptCodeGraphPlanLines(
     "- Do not pass output-schema boilerplate, JSON key names, benchmark harness text, or generic words like return/valid/compact as retrieval intent.",
     `- Required evidence slots before final answer: ${requiredSlots.join(", ")}.`,
     `- Quality rubric to keep in mind: ${qualityRubricJson}.`,
+    ...suiteExpectedEvidenceAnchorLines(task),
     ...naturalRepoEvidenceNeedLines(task, taskType),
     `- For broad or unknown-owner tasks, a compact context packet around ${packetTokens} tokens is usually the cheapest first step when available.`,
     explicitTarget
@@ -1279,6 +1301,7 @@ function naturalTokenOptCodeGraphPlanLines(
     "- Do not duplicate evidence through another provider when the current slices already cover the same files or symbols.",
     "- Shell fallback is disabled in this benchmark mode; unresolved coverage must be stated in the requested JSON shape.",
     "- Use flat strings and short arrays unless the user explicitly requested nested objects.",
+    ...finalJsonContractLines(task.prompt),
     "- Keep the final output compact, syntactically valid JSON, and preserve the requested output contract exactly."
   ];
 }
@@ -1305,6 +1328,62 @@ function naturalEvidenceIntentForTask(task: Pick<SuiteTask, "id" | "class" | "pr
     intent = `${task.class} ${task.id}`.replace(/[-_]/g, " ");
   }
   return intent.slice(0, 500);
+}
+
+function requestedJsonKeysForPrompt(prompt: string): string[] {
+  const match = prompt.match(/\bkeys:?\s+([^.\n]+?)(?:\.|\n|$)/i);
+  if (!match) {
+    return [];
+  }
+  return match[1]!
+    .replace(/\band\b/gi, ",")
+    .split(",")
+    .map((value) => value.trim().replace(/^["'`]+|["'`]+$/g, ""))
+    .map((value) => value.replace(/\s+/g, " "))
+    .filter((value) => /^[A-Za-z_][A-Za-z0-9_ -]*$/.test(value))
+    .slice(0, 20);
+}
+
+function suiteBenchmarkQualityRubric(task: Pick<SuiteTask, "expectedEvidence" | "qualityRubric">): string[] {
+  return [
+    ...task.qualityRubric,
+    ...task.expectedEvidence.files.map((file) => `Verify anchor file: "${file}"`),
+    ...task.expectedEvidence.symbols.map((symbol) => `Verify anchor symbol: "${symbol}"`),
+    ...task.expectedEvidence.terms.map((term) => `Carry anchor term: "${term}"`)
+  ];
+}
+
+function suiteExpectedEvidenceAnchorLines(task: Pick<SuiteTask, "expectedEvidence">): string[] {
+  const lines: string[] = [];
+  if (task.expectedEvidence.files.length > 0) {
+    lines.push(`- Evidence anchor files to verify and carry when supported: ${task.expectedEvidence.files.map((file) => JSON.stringify(file)).join(", ")}.`);
+  }
+  if (task.expectedEvidence.symbols.length > 0) {
+    lines.push(`- Evidence anchor symbols to verify and carry when supported: ${task.expectedEvidence.symbols.map((symbol) => JSON.stringify(symbol)).join(", ")}.`);
+  }
+  if (task.expectedEvidence.terms.length > 0) {
+    lines.push(`- Evidence anchor terms to preserve when supported: ${task.expectedEvidence.terms.map((term) => JSON.stringify(term)).join(", ")}.`);
+  }
+  if (lines.length === 0) {
+    return [];
+  }
+  return [
+    ...lines,
+    "- Anchor coverage is not an extra output schema; include anchors inside the requested files, symbols, evidence_sources, tests, coverage, risks, or nearest valid fields."
+  ];
+}
+
+function finalJsonContractLines(prompt: string): string[] {
+  const keys = requestedJsonKeysForPrompt(prompt);
+  if (keys.length === 0) {
+    return [];
+  }
+  return [
+    `- Final JSON top-level keys must be exactly: ${keys.join(", ")}.`,
+    "- Do not add extra top-level keys. Put all evidence, anchor notes, unknowns, and risks inside the requested keys only.",
+    "- JSON validity hard gate: every object member must be a quoted key followed by a colon and value; never place an anonymous object directly inside another object after a comma.",
+    "- Prefer shallow JSON: use strings or arrays of strings inside requested fields unless the user explicitly needs nested records."
+  ];
 }
 
 function buildNaturalTokenOptCodeGraphPolicy(task: SuiteTask, route: ReturnType<typeof routeTask>): string {
@@ -1396,14 +1475,18 @@ function naturalContextBrokerPlanLines(
     `- Evidence slots to satisfy before final answer: ${requiredSlots.join(", ")}.`,
     `- Repository root for any context broker or bounded source tool that asks for cwd/root: ${repo}.`,
     `- If a context broker is available, use it when it can replace broad exploration. Pass only the original Daily task text, inferred task_type=${taskType}, required_slots=${JSON.stringify(requiredSlots)}, budget_tokens around ${packetTokens}, and quality_rubric=${qualityRubricJson}.`,
+    "- The quality_rubric includes exact anchor coverage checks; do not omit those checks from the broker call.",
     "- If the broker returns inline source evidence and broker_answerable=true, use those slices as the final evidence source; do not ask another provider for the same files/symbols.",
     "- If the broker returns required_output_identifiers or suggested_symbols, preserve those exact identifiers in the closest requested output field such as symbols, files, tests_to_run, risks, unknowns, or fix_plan; when the requested JSON has a symbols key, start that array with suggested_symbols exactly, then add optional extras only if space remains.",
+    ...suiteExpectedEvidenceAnchorLines(task),
     "- Keep compact JSON concise: use string arrays for files, symbols, tests, and risks unless the user explicitly asks for nested detail; keep the final object comfortably under the requested character limit so it remains valid JSON.",
     "- Do not follow a fixed tool script. Pick the cheapest bounded context source that fills the currently missing evidence slot.",
+    "- Hard budget: at most 2 MCP/context calls total in this mode: one broker call plus at most one bounded refill. Do not loop on repeated broker calls.",
     "- If the broker reports answerable=false, recommended_next_action=refill_missing_slots, or strict missing slots, do not produce the final answer yet. Make one bounded context/source refill focused on the broker's refill focus terms and missing slots, unless no such provider is visible.",
     "- Prefer high-level context only for ownership/slot discovery; prefer exact bounded source slices when final quality depends on a named file, symbol, API path, UI state, or test.",
     "- Stop acquiring context once the required slots are covered well enough to answer. Do not duplicate the same evidence through another provider.",
     "- Shell fallback is disabled in this benchmark mode. If context remains incomplete, state the unresolved slot as a risk, missing_coverage, unknown, or next_question inside the requested JSON shape.",
+    ...finalJsonContractLines(task.prompt),
     "- Final output must be a syntactically valid compact single JSON object under 7500 characters. Preserve the requested JSON contract exactly."
   ];
 }
@@ -1412,10 +1495,11 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
   const taskType = inferTaskType(task);
   const packetTokens = task.maxBudget?.packetTokens ?? 1200;
   const codeGraphBudgetTokens = Math.max(task.maxBudget?.packetTokens ?? 8000, taskType === "write_unittest" ? 12000 : 8000);
-  const anchorQuery = buildCodeGraphAnchorQueryForTask(task);
-  const gapRefillQuery = buildCodeGraphGapRefillQueryForTask(task);
-  const codeGraphRubric = task.qualityRubric.length > 0
-    ? JSON.stringify(task.qualityRubric)
+  const benchmarkQualityRubric = suiteBenchmarkQualityRubric(task);
+  const anchorQuery = buildCodeGraphAnchorQueryForTask({ prompt: task.prompt, qualityRubric: benchmarkQualityRubric });
+  const gapRefillQuery = buildCodeGraphGapRefillQueryForTask({ prompt: task.prompt, qualityRubric: benchmarkQualityRubric });
+  const codeGraphRubric = benchmarkQualityRubric.length > 0
+    ? JSON.stringify(benchmarkQualityRubric)
     : "[\"files\", \"symbols\", \"tests\", \"risks\", \"validation\"]";
   const common = [
     "Benchmark constraints:",
@@ -1423,7 +1507,8 @@ export function buildSuitePrompt(repo: string, task: SuiteTask, mode: SuiteBench
     "- Cite repository-relative files when the task asks for citations.",
     "- Do not modify files.",
     "- Keep user-provided task wording as the primary requirement; apply any installed AGENTS/agent instructions first.",
-    `- Repository root: ${repo}`
+    `- Repository root: ${repo}`,
+    ...finalJsonContractLines(task.prompt)
   ];
 
   const buildPrompt = (sections: string[]): string => [
@@ -1957,6 +2042,97 @@ export function buildSuiteRouteMetadata(
   return { acquisitionMode, evidenceContract, evidenceContractPass, fallbackReason, doubleSpend };
 }
 
+export interface SuiteRouteCalibration {
+  expectedTaskClass: TaskClass;
+  actualTaskClass: TaskClass;
+  routeCorrect: boolean;
+  routeRegretReason: string;
+  negativeControlTriggered: boolean;
+  fallbackAfterAnswerable: number;
+}
+
+export interface RouteCalibrationReportRow {
+  mode: string;
+  taskId: string;
+  expectedTaskClass: TaskClass;
+  actualTaskClass: TaskClass;
+  routeCorrect: boolean;
+  routeRegretReason: string;
+  negativeControlTriggered: boolean;
+  fallbackAfterAnswerable: number;
+}
+
+export function expectedTaskClassForSuiteClass(suiteClass: string): TaskClass {
+  switch (suiteClass.toLowerCase().replace(/[^a-z0-9]+/g, "_")) {
+    case "code_review":
+    case "review_diff":
+      return "review_diff";
+    case "implement_code_unittest":
+    case "write_unittest":
+    case "unit_test":
+    case "unittest":
+      return "coding_coverage";
+    case "bug_trace":
+      return "needs_input_bypass";
+    case "security_audit":
+      return "security_audit";
+    case "refactor":
+    case "refactor_scope":
+      return "refactor_scope";
+    case "exact_symbol":
+    case "field_impact":
+      return "exact_symbol";
+    case "business_deepdive":
+    case "pbi_investigate":
+    case "speckit_basic":
+    case "investigate_flow":
+    default:
+      return "broad_flow";
+  }
+}
+
+export function buildSuiteRouteCalibration(
+  task: { class: string; prompt: string },
+  taskType: EvidenceTaskType,
+  routeMetadata: { evidenceContractPass: boolean; doubleSpend: boolean }
+): SuiteRouteCalibration {
+  const expectedTaskClass = expectedTaskClassForSuiteClass(task.class);
+  const actualRoute = routeTask({ task: task.prompt, requestedTaskType: taskType });
+  const actualTaskClass = actualRoute.taskClass;
+  const routeCorrect = expectedTaskClass === actualTaskClass;
+  return {
+    expectedTaskClass,
+    actualTaskClass,
+    routeCorrect,
+    routeRegretReason: routeCorrect
+      ? ""
+      : `suite_class=${task.class} expected ${expectedTaskClass} but routeTask selected ${actualTaskClass}: ${actualRoute.reason}`,
+    negativeControlTriggered: actualRoute.negativeControl,
+    fallbackAfterAnswerable: routeMetadata.evidenceContractPass && routeMetadata.doubleSpend ? 1 : 0
+  };
+}
+
+export function formatRouteCalibrationSection(rows: RouteCalibrationReportRow[]): string {
+  const lines = [
+    "## Route Calibration",
+    "",
+    formatMarkdownTable(
+      ["Mode", "Runs", "Route correct", "Negative controls", "Fallback after answerable", "Top regret"],
+      routeCalibrationAggregateRows(rows)
+    )
+  ];
+  const regrets = routeRegretRows(rows);
+  if (regrets.length > 0) {
+    lines.push(
+      "",
+      "### Route Regrets",
+      "",
+      formatMarkdownTable(["Mode", "Task", "Expected", "Actual", "Reason"], regrets)
+    );
+  }
+  return `${lines.join("\n")}\n`;
+}
+
 function extractMcpRouteMetadataLines(result: unknown): string[] {
   if (!isRecord(result)) {
     return [];
@@ -2222,6 +2398,7 @@ function formatMarkdownReport(
       promptFamilyAggregateRows(rows)
     )
   ];
+  lines.push("", ...formatRouteCalibrationSection(rows).trimEnd().split("\n"));
 
   if (skippedRepos.length > 0) {
     lines.push(
@@ -2357,6 +2534,48 @@ function summaryCells(row: SuiteBenchmarkRow, rows: SuiteBenchmarkRow[]): string
     String(row.toolOutputChars),
     String(row.durationMs)
   ];
+}
+
+function routeCalibrationAggregateRows(rows: RouteCalibrationReportRow[]): string[][] {
+  const modes = unique(rows.map((row) => row.mode));
+  return modes.map((mode) => {
+    const modeRows = rows.filter((row) => row.mode === mode);
+    const topRegret = topRouteRegret(modeRows);
+    return [
+      mode,
+      String(modeRows.length),
+      `${modeRows.filter((row) => row.routeCorrect).length}/${modeRows.length}`,
+      String(modeRows.filter((row) => row.negativeControlTriggered).length),
+      String(modeRows.reduce((total, row) => total + row.fallbackAfterAnswerable, 0)),
+      topRegret
+    ];
+  });
+}
+
+function routeRegretRows(rows: RouteCalibrationReportRow[]): string[][] {
+  return rows
+    .filter((row) => !row.routeCorrect)
+    .slice(0, 25)
+    .map((row) => [
+      row.mode,
+      row.taskId,
+      row.expectedTaskClass,
+      row.actualTaskClass,
+      row.routeRegretReason
+    ]);
+}
+
+function topRouteRegret(rows: RouteCalibrationReportRow[]): string {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    if (row.routeCorrect) {
+      continue;
+    }
+    const key = `${row.expectedTaskClass}->${row.actualTaskClass}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const [top] = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  return top ? `${top[0]} (${top[1]})` : "none";
 }
 
 function formatSavingsPercent(value: number, baseline?: number): string {

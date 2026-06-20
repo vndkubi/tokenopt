@@ -86,6 +86,42 @@ test("mcp broker mode exposes only the natural broker", async () => {
   );
 });
 
+test("mcp compile evidence reports cache miss then cache hit metadata", async () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-mcp-cache-repo-"));
+  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-mcp-cache-artifacts-"));
+  fs.writeFileSync(
+    path.join(repo, "package.json"),
+    JSON.stringify({ name: "mcp-cache-fixture", scripts: { test: "node --test" } }, null, 2)
+  );
+  fs.writeFileSync(path.join(repo, "README.md"), "# Cache Fixture\n\nThis repository handles order approvals and refunds.\n");
+
+  await withTokenOptMcp(
+    async (client) => {
+      const args = {
+        task: "Research the business purpose of this repository.",
+        task_type: "research_business",
+        cwd: repo
+      };
+      const first = await client.callTool({ name: "tokenopt_compile_evidence", arguments: args });
+      const firstMetadata = first.structuredContent.packetSummary.metadata;
+      assert.equal(firstMetadata.evidence_cache_hit, false);
+      assert.equal(typeof firstMetadata.evidence_cache_key, "string");
+      assert.equal(firstMetadata.estimator_version, "ratio-v1");
+
+      const second = await client.callTool({ name: "tokenopt_compile_evidence", arguments: args });
+      const secondMetadata = second.structuredContent.packetSummary.metadata;
+      assert.equal(secondMetadata.evidence_cache_hit, true);
+      assert.equal(secondMetadata.evidence_cache_key, firstMetadata.evidence_cache_key);
+
+      const statePath = second.structuredContent.packetSummary.statePath;
+      const state = JSON.parse(fs.readFileSync(statePath, "utf8"));
+      assert.equal(state.packet.metadata.evidence_cache_hit, true);
+      assert.equal(state.packet.recommended_next_action, "answer_now");
+    },
+    { cwd: repo, artifactDir }
+  );
+});
+
 test("mcp contextgate broker exposes natural coverage contract", async () => {
   const repo = fs.mkdtempSync(path.join(os.tmpdir(), "contextgate-mcp-repo-"));
   fs.writeFileSync(

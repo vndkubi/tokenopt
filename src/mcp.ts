@@ -11,6 +11,13 @@ import { parseFailurePacket } from "./coding/failure-packet.js";
 import { buildSymbolPacket, collectCodingFiles, findCodingSymbols } from "./coding/symbol-index.js";
 import { findTestNeighbors } from "./coding/test-neighbors.js";
 import { loadConfig } from "./config.js";
+import {
+  createEvidenceCacheLookup,
+  evidenceCacheMetadata,
+  isCacheableEvidencePacket,
+  readEvidenceCacheEntry,
+  writeEvidenceCacheEntry
+} from "./evidence-cache.js";
 import { readActiveEvidenceTaskState, writeEvidenceTaskState } from "./evidence-state.js";
 import { executeWrappedShellCommand } from "./exec.js";
 import { filterJakartaAnnotations } from "./filters/jakarta-annotation-filter.js";
@@ -687,7 +694,7 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
   }, mcpMode);
   const originalText = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
   const baseStrictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
-  const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, taskWithExternalArtifacts, requiredSlots, optionalNumber(args, "budget_tokens"));
+  const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, taskWithExternalArtifacts, requiredSlots, optionalNumber(args, "budget_tokens"), qualityRubric);
   const strictGaps = inlineEvidence.slices.length > 0 ? inlineEvidence.strictMissingSlots : baseStrictGaps;
   const effectiveAnswerable = strictGaps.length === 0 && (contextGateBaseAnswerable(result.structuredContent) || inlineEvidence.slices.length > 0);
   const refillFocusTerms = uniqueStrings([
@@ -775,9 +782,10 @@ function buildContextGateInlineEvidence(
   repoRoot: string,
   task: string,
   requiredSlots: string[],
-  requestedBudgetTokens: number | undefined
+  requestedBudgetTokens: number | undefined,
+  qualityRubric: string[] = []
 ): ContextGateInlineEvidence {
-  const focusTerms = contextGateInlineFocusTerms(structuredContent, task);
+  const focusTerms = contextGateInlineFocusTerms(structuredContent, task, qualityRubric);
   const factFiles = contextGateInlineFocusFiles(structuredContent, focusTerms);
   const hits = collectFlowSearchHits(repoRoot, focusTerms.slice(0, 14));
   const hitFiles = uniqueStrings(hits.map((hit) => hit.file));
@@ -823,18 +831,23 @@ function buildContextGateInlineEvidence(
   };
 }
 
-function contextGateInlineFocusTerms(structuredContent: Record<string, unknown> | undefined, task: string): string[] {
+function contextGateInlineFocusTerms(structuredContent: Record<string, unknown> | undefined, task: string, qualityRubric: string[] = []): string[] {
   const taskText = stripOutputContractText(task);
+  const rubricText = qualityRubric.join(" ");
   const factTerms = contextGateFactValues(structuredContent, /^(?:feature_terms|domain_terms)$/)
     .flatMap((value) => value.split(",").map((part) => part.trim()));
-  return uniqueStrings([
-    ...selectBusinessFeatureTerms(taskText),
+  const terms = uniqueStrings([
+    ...selectBusinessFeatureTerms(`${taskText} ${rubricText}`),
     ...factTerms,
     ...extractQuotedTerms(taskText),
+    ...extractQuotedTerms(rubricText),
     ...extractStrongCodeLikeTaskTerms(taskText),
+    ...extractStrongCodeLikeTaskTerms(rubricText),
     ...extractHyphenatedIdentifierVariants(taskText),
+    ...extractHyphenatedIdentifierVariants(rubricText),
     ...extractRouteTerms(taskText)
-  ]).filter(isUsefulFlowSearchTerm).slice(0, 36);
+  ]).filter(isUsefulFlowSearchTerm);
+  return prioritizeContextGateFocusTerms(terms).slice(0, 36);
 }
 
 function contextGateInlineFocusFiles(structuredContent: Record<string, unknown> | undefined, focusTerms: string[]): string[] {
@@ -846,18 +859,62 @@ function contextGateInlineFocusFiles(structuredContent: Record<string, unknown> 
 }
 
 function contextGatePathMatchFiles(repoRoot: string, focusTerms: string[]): string[] {
+  const explicitFiles = contextGateExplicitFocusFiles(repoRoot, focusTerms);
   const files = collectNodeRepoFiles(repoRoot, { maxFiles: 25_000, maxDepth: 24 }).files
     .map((file) => file.replace(/\\/g, "/"))
-    .filter((file) => isSourceFlowFile(file) || isTestFlowFile(file))
+    .filter((file) => isSourceFlowFile(file) || isTestFlowFile(file) || explicitFiles.includes(file))
     .filter((file) => !isGeneratedFlowFile(file) && !isProbablyBinaryPath(file))
     .filter((file) => pathMatchesTerms(file, focusTerms));
-  return files
+  return uniqueStrings([...explicitFiles, ...files])
     .sort((a, b) =>
       scoreContextGateTermPathMatch(b, focusTerms) - scoreContextGateTermPathMatch(a, focusTerms) ||
       scoreFlowFile(b) - scoreFlowFile(a) ||
       a.localeCompare(b)
     )
     .slice(0, 100);
+}
+
+function prioritizeContextGateFocusTerms(terms: string[]): string[] {
+  return terms
+    .map((term, index) => ({ term, index, score: scoreContextGateFocusTerm(term) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index || a.term.localeCompare(b.term))
+    .map((item) => item.term);
+}
+
+function scoreContextGateFocusTerm(term: string): number {
+  let score = 0;
+  if (/\.(?:ts|tsx|js|jsx|java|py|go|rs|kt|scala|cs|md|mdx|json|yml|yaml)$/i.test(term)) {
+    score += 220;
+  }
+  if (term.includes("/") || term.includes("\\")) {
+    score += 120;
+  }
+  if (/[a-z][A-Za-z0-9]*[A-Z]/.test(term) || /^[A-Z][A-Za-z0-9_]{3,}$/.test(term)) {
+    score += 90;
+  }
+  if (term.includes("_") || term.includes("-")) {
+    score += 35;
+  }
+  return score;
+}
+
+function contextGateExplicitFocusFiles(repoRoot: string, focusTerms: string[]): string[] {
+  const files: string[] = [];
+  for (const term of focusTerms) {
+    const normalized = term.trim().replace(/^["'`]+|["'`]+$/g, "").replace(/\\/g, "/");
+    if (!/\.(?:ts|tsx|js|jsx|java|py|go|rs|kt|scala|cs|md|mdx|json|yml|yaml)$/i.test(normalized)) {
+      continue;
+    }
+    const absolute = path.resolve(repoRoot, normalized);
+    const relative = path.relative(repoRoot, absolute).replace(/\\/g, "/");
+    if (!relative || relative.startsWith("..") || path.isAbsolute(relative) || isProbablyBinaryPath(relative) || isArtifactLikePath(relative)) {
+      continue;
+    }
+    if (fs.existsSync(path.join(repoRoot, relative))) {
+      files.push(relative);
+    }
+  }
+  return uniqueStrings(files);
 }
 
 function contextGateFactValues(structuredContent: Record<string, unknown> | undefined, keyPattern: RegExp): string[] {
@@ -1757,6 +1814,39 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
       includeStructuredPacket
     }, mcpMode);
   }
+  const cacheLookup = createEvidenceCacheLookup(loaded.repoRoot, {
+    task,
+    taskType: earlyTaskType,
+    budgetTokens,
+    mcpMode,
+    detail,
+    qualityRubric
+  });
+  const cached = readEvidenceCacheEntry(loaded.config, loaded.repoRoot, cacheLookup);
+  if (cached) {
+    const packet = withPacketMetadata(cached.packet, evidenceCacheMetadata(cacheLookup, true, cached.packet.metadata ?? {}));
+    const statePath = writeEvidenceTaskState(loaded.config, loaded.repoRoot, packet);
+    appendEvent(loaded.config, {
+      timestamp: new Date().toISOString(),
+      source: "mcp",
+      eventName: "compile-evidence",
+      repoRoot: loaded.repoRoot,
+      action: "evidence",
+      reason: "evidence-cache-hit",
+      metadata: {
+        packetId: packet.packet_id,
+        taskType: packet.task_type,
+        acquisitionMode: packet.acquisition_mode,
+        evidenceContract: packet.evidence_contract,
+        evidenceContractPass: packet.evidence_contract_pass,
+        statePath,
+        evidenceTokens: packet.token_budget.evidence_tokens_est,
+        evidenceCacheHit: true,
+        evidenceCacheKey: cacheLookup.keyHash
+      }
+    });
+    return textResult(formatEvidencePacket(packet, statePath, detail), false, buildEvidenceStructuredContent(packet, statePath, includeStructuredPacket));
+  }
   const inventory = buildRepoInventory(loaded.repoRoot, loaded.config, loaded.repoRoot);
   const route = routeTask({
     task,
@@ -1826,7 +1916,8 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
 
   const taskSpecific = compileTaskSpecificEvidence(taskType, task, loaded.repoRoot, evidence.length + 1, evidenceContext, {
     hasBuildFacts,
-    codingToolsAvailable: mcpMode === "full"
+    codingToolsAvailable: mcpMode === "full",
+    qualityRubric
   });
   if (taskSpecific) {
     evidence.push(...taskSpecific.evidence);
@@ -1931,11 +2022,15 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
       evidence_tokens_est: evidence.reduce((total, item) => total + (item.tokens_est ?? estimateTokens(JSON.stringify(item))), 0),
       response_tokens_est: answerable ? Math.min(900, Math.max(300, Math.floor(budgetTokens * 0.45))) : 250
     },
+    metadata: evidenceCacheMetadata(cacheLookup, false, taskSpecific?.metadata ?? {}),
     created_at: now.toISOString(),
     expires_at: expiresAt.toISOString()
   };
 
   const statePath = writeEvidenceTaskState(loaded.config, loaded.repoRoot, packet);
+  const cachePath = isCacheableEvidencePacket(packet)
+    ? writeEvidenceCacheEntry(loaded.config, loaded.repoRoot, cacheLookup, packet)
+    : undefined;
   appendEvent(loaded.config, {
     timestamp: now.toISOString(),
     source: "mcp",
@@ -1950,7 +2045,11 @@ function compileEvidenceTool(args: Record<string, unknown>, mcpMode: McpMode = "
       evidenceContract: packet.evidence_contract,
       evidenceContractPass: packet.evidence_contract_pass,
       statePath,
-      evidenceTokens: packet.token_budget.evidence_tokens_est
+      evidenceTokens: packet.token_budget.evidence_tokens_est,
+      evidenceCacheHit: false,
+      evidenceCacheKey: cacheLookup.keyHash,
+      evidenceCachePath: cachePath,
+      symbolIndexHit: taskSpecific?.metadata?.symbol_index_hit
     }
   });
 
@@ -3694,6 +3793,7 @@ interface TaskSpecificEvidence {
   evidence: EvidenceItem[];
   missing: string[];
   allowedFollowups: EvidenceFollowup[];
+  metadata?: Record<string, unknown>;
 }
 
 interface ReviewDiffLine {
@@ -3784,7 +3884,7 @@ function compileTaskSpecificEvidence(
   repoRoot: string,
   firstEvidenceIndex: number,
   context: EvidenceContext,
-  options: { hasBuildFacts: boolean; codingToolsAvailable: boolean }
+  options: { hasBuildFacts: boolean; codingToolsAvailable: boolean; qualityRubric?: string[] }
 ): TaskSpecificEvidence | undefined {
   if (taskType === "review_diff") {
     return compileReviewDiffEvidence(task, repoRoot, firstEvidenceIndex);
@@ -3799,6 +3899,7 @@ function compileTaskSpecificEvidence(
     repoRoot,
     task,
     taskType,
+    qualityRubric: options.qualityRubric,
     firstEvidenceIndex,
     hasBuildFacts: options.hasBuildFacts,
     codingToolsAvailable: options.codingToolsAvailable
@@ -3810,7 +3911,8 @@ function compileTaskSpecificEvidence(
       coverage: coding.coverage,
       evidence: coding.evidence,
       missing: coding.missing,
-      allowedFollowups: coding.allowedFollowups
+      allowedFollowups: coding.allowedFollowups,
+      metadata: coding.metadata
     };
   }
   return undefined;
@@ -4220,9 +4322,10 @@ function extractFlowTarget(task: string): string {
 }
 
 function stripOutputContractText(text: string): string {
+  const outputContract = /Return\s+(?:valid\s+)?(?:compact\s+)?JSON\s+(?:only\s+)?with\s+keys:?\s+[^.?!]+[.?!]?/i;
   return text
-    .replace(/\bReturn\s+(?:valid\s+)?(?:compact\s+)?JSON\b[\s\S]*$/i, "")
-    .replace(/\bReturn\s+compact\s+JSON\b[\s\S]*$/i, "")
+    .replace(new RegExp(`^\\s*${outputContract.source}\\s*`, "i"), "")
+    .replace(new RegExp(`\\s*${outputContract.source}\\s*$`, "i"), "")
     .trim();
 }
 
@@ -6453,6 +6556,7 @@ function buildEvidenceStructuredContent(packet: EvidencePacket, statePath: strin
     confidence: packet.confidence,
     coverage_certificate: packet.coverage_certificate,
     output_policy: packet.output_policy,
+    metadata: packet.metadata,
     recommended_next_action: packet.recommended_next_action,
     max_additional_calls: packet.max_additional_calls,
     statePath,
@@ -6471,6 +6575,16 @@ function buildEvidenceStructuredContent(packet: EvidencePacket, statePath: strin
   return includePacket
     ? { packetSummary, packet, statePath }
     : { packetSummary, statePath };
+}
+
+function withPacketMetadata(packet: EvidencePacket, metadata: Record<string, unknown>): EvidencePacket {
+  return {
+    ...packet,
+    metadata: {
+      ...(packet.metadata ?? {}),
+      ...metadata
+    }
+  };
 }
 
 function formatEvidencePacket(packet: EvidencePacket, statePath: string | undefined, detail: EvidenceDetail): string {
@@ -6549,6 +6663,7 @@ function formatFullEvidencePacket(packet: EvidencePacket, statePath: string | un
     `confidence: ${packet.confidence}`,
     packet.coverage_certificate ? `deny_broad_exploration: ${packet.coverage_certificate.deny_broad_exploration}` : undefined,
     packet.output_policy ? `output_policy: ${JSON.stringify(packet.output_policy)}` : undefined,
+    packet.metadata ? `metadata: ${JSON.stringify(packet.metadata)}` : undefined,
     `recommended_next_action: ${packet.recommended_next_action}`,
     `max_additional_calls: ${packet.max_additional_calls}`,
     statePath ? `state_path: ${statePath}` : undefined,

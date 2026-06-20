@@ -11,7 +11,11 @@ import {
   buildCodeGraphGapRefillQueryForTask,
   buildCodeGraphMcpServerConfig,
   buildSuitePrompt,
+  buildSuiteRouteCalibration,
   buildSuiteRouteMetadata,
+  expectedTaskClassForSuiteClass,
+  formatRouteCalibrationSection,
+  scoreSuiteAnswer,
   scoreSuiteIdeaQuality
 } from "../dist/suite-benchmark.js";
 
@@ -106,10 +110,50 @@ test("contextgate natural prompt uses evidence contract instead of fixed tool ca
   assert.match(prompt, /required_output_identifiers or suggested_symbols/);
   assert.match(prompt, /start that array with suggested_symbols exactly/);
   assert.match(prompt, /Keep compact JSON concise/);
+  assert.match(prompt, /Hard budget: at most 2 MCP\/context calls total/);
+  assert.match(prompt, /Final JSON top-level keys must be exactly: summary, files, symbols, risks/);
   assert.doesNotMatch(prompt, /tokenopt_compile_evidence/);
   assert.doesNotMatch(prompt, /get_file_slice/);
   assert.doesNotMatch(prompt, /TokenOpt/);
   assert.doesNotMatch(prompt, /CodeGraph/);
+});
+
+test("contextgate natural prompt carries suite anchor coverage contract", () => {
+  const task = {
+    id: "tokenopt-natural-anchor-contract",
+    project: "tokenopt",
+    class: "implement_code_unittest",
+    winnerHypothesis: "",
+    prompt: "Return valid compact JSON only with keys scope, files_to_change, implementation_steps, business_coverage, tests_to_add, validation_commands, compatibility_risks. Create an implementation handoff for natural benchmark prompt quality.",
+    expectedEvidence: {
+      files: ["src/suite-benchmark.ts", "test/suite-benchmark-metadata.test.mjs", "test/mcp.test.mjs"],
+      symbols: ["naturalTokenOptCodeGraphPlanLines", "naturalTaskWantsTestEvidence", "buildSuitePrompt"],
+      terms: ["business", "coverage", "validation"]
+    },
+    qualityRubric: ["identifies owner files"],
+    gateAssertions: [],
+    maxBudget: { packetTokens: 1800 }
+  };
+  const prompt = buildSuitePrompt("D:\\Personal\\Projects\\tokenopt", task, "contextgate-natural");
+
+  assert.match(prompt, /Final JSON top-level keys must be exactly: scope, files_to_change, implementation_steps, business_coverage, tests_to_add, validation_commands, compatibility_risks/);
+  assert.match(prompt, /quality_rubric=\["identifies owner files","Verify anchor file: \\"src\/suite-benchmark\.ts\\"/);
+  assert.match(prompt, /Verify anchor symbol: \\"naturalTokenOptCodeGraphPlanLines\\"/);
+  assert.match(prompt, /Carry anchor term: \\"validation\\"/);
+  assert.match(prompt, /Evidence anchor files to verify and carry when supported: "src\/suite-benchmark\.ts"/);
+  assert.match(prompt, /Anchor coverage is not an extra output schema/);
+  assert.match(prompt, /Hard budget: at most 2 MCP\/context calls total/);
+
+  const scored = scoreSuiteAnswer(task, JSON.stringify({
+    scope: "Use src/suite-benchmark.ts and test/mcp.test.mjs to preserve business coverage validation.",
+    files_to_change: ["src/suite-benchmark.ts", "test/suite-benchmark-metadata.test.mjs", "test/mcp.test.mjs"],
+    implementation_steps: ["Update naturalTokenOptCodeGraphPlanLines and buildSuitePrompt."],
+    business_coverage: ["business coverage validation remains explicit"],
+    tests_to_add: ["test naturalTaskWantsTestEvidence coverage"],
+    validation_commands: ["cmd /c npm test"],
+    compatibility_risks: ["prompt contract drift"]
+  }));
+  assert.equal(scored.score, 1);
 });
 
 test("tokenopt codegraph natural prompt stays route-aware without fixed tool scripts", () => {
@@ -209,6 +253,77 @@ test("suite benchmark metadata flags direct-narrow double spend", () => {
 
   assert.equal(metadata.acquisitionMode, "direct_narrow");
   assert.equal(metadata.doubleSpend, true);
+});
+
+test("route calibration maps known review tasks to review_diff", () => {
+  const calibration = buildSuiteRouteCalibration(
+    {
+      class: "code_review",
+      prompt: "Review this diff:\ndiff --git a/src/a.ts b/src/a.ts\n@@ -1 +1 @@\n-old\n+new"
+    },
+    "review_diff",
+    { evidenceContractPass: true, doubleSpend: false }
+  );
+
+  assert.equal(expectedTaskClassForSuiteClass("code_review"), "review_diff");
+  assert.equal(calibration.expectedTaskClass, "review_diff");
+  assert.equal(calibration.actualTaskClass, "review_diff");
+  assert.equal(calibration.routeCorrect, true);
+  assert.equal(calibration.routeRegretReason, "");
+});
+
+test("route calibration records missing-artifact bypass and exact-target negative controls", () => {
+  const missing = buildSuiteRouteCalibration(
+    { class: "bug_trace", prompt: "Tracebug this production issue." },
+    "investigate",
+    { evidenceContractPass: false, doubleSpend: false }
+  );
+  assert.equal(missing.expectedTaskClass, "needs_input_bypass");
+  assert.equal(missing.actualTaskClass, "needs_input_bypass");
+  assert.equal(missing.negativeControlTriggered, true);
+
+  const exact = buildSuiteRouteCalibration(
+    { class: "business_deepdive", prompt: "Find usages of OrderService.authorizePayment in src/orders/OrderService.ts" },
+    "field_impact",
+    { evidenceContractPass: true, doubleSpend: true }
+  );
+  assert.equal(exact.actualTaskClass, "exact_symbol");
+  assert.equal(exact.negativeControlTriggered, true);
+  assert.equal(exact.routeCorrect, false);
+  assert.match(exact.routeRegretReason, /expected broad_flow but routeTask selected exact_symbol/);
+  assert.equal(exact.fallbackAfterAnswerable, 1);
+});
+
+test("route calibration markdown reports route correctness and regrets", () => {
+  const markdown = formatRouteCalibrationSection([
+    {
+      mode: "contextgate-natural",
+      taskId: "review-1",
+      expectedTaskClass: "review_diff",
+      actualTaskClass: "review_diff",
+      routeCorrect: true,
+      routeRegretReason: "",
+      negativeControlTriggered: false,
+      fallbackAfterAnswerable: 0
+    },
+    {
+      mode: "contextgate-natural",
+      taskId: "exact-1",
+      expectedTaskClass: "broad_flow",
+      actualTaskClass: "exact_symbol",
+      routeCorrect: false,
+      routeRegretReason: "suite_class=business_deepdive expected broad_flow but routeTask selected exact_symbol",
+      negativeControlTriggered: true,
+      fallbackAfterAnswerable: 1
+    }
+  ]);
+
+  assert.match(markdown, /## Route Calibration/);
+  assert.match(markdown, /Route correct/);
+  assert.match(markdown, /1\/2/);
+  assert.match(markdown, /broad_flow->exact_symbol \(1\)/);
+  assert.match(markdown, /### Route Regrets/);
+  assert.match(markdown, /exact-1/);
 });
 
 test("codegraph mcp config uses local v2 cli root", () => {

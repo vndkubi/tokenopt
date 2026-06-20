@@ -142,6 +142,52 @@ test("mcp lockfile reads are denied", () => {
   assert.equal(decision.action, "deny");
 });
 
+test("mcp lockfile deny takes precedence over active evidence state", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-lockfile-precedence-"));
+  const artifactDir = fs.mkdtempSync(path.join(os.tmpdir(), "tokenopt-lockfile-precedence-artifacts-"));
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ name: "lockfile-precedence-fixture" }));
+  fs.writeFileSync(path.join(repo, "package-lock.json"), JSON.stringify({ lockfileVersion: 3 }));
+  const loaded = loadConfig({ cwd: repo, env: { TOKENOPT_ARTIFACT_DIR: artifactDir } });
+  writeEvidenceTaskState(loaded.config, loaded.repoRoot, {
+    packet_id: "packet-lockfile",
+    task: "study repository purpose",
+    task_type: "research_business",
+    repo_root: loaded.repoRoot,
+    answerable: true,
+    confidence: 0.88,
+    coverage: {},
+    evidence: [],
+    missing: [],
+    allowed_followups: [],
+    disallowed_followups: ["raw_source_acquisition"],
+    recommended_next_action: "answer_now",
+    max_additional_calls: 0,
+    token_budget: {
+      budget_tokens: 1600,
+      evidence_tokens_est: 200,
+      response_tokens_est: 700
+    },
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 60_000).toISOString()
+  });
+
+  const decision = evaluatePolicy(
+    {
+      source: "codex",
+      eventName: "pre-tool-use",
+      cwd: repo,
+      toolName: "mcp__fs__read_file",
+      toolInput: { path: "package-lock.json" },
+      raw: {}
+    },
+    loaded.config,
+    { repoRoot: loaded.repoRoot }
+  );
+
+  assert.equal(decision.action, "deny");
+  assert.match(decision.reason, /lockfiles are usually high-token/);
+});
+
 test("repo-wide rg file listing is denied", () => {
   const loaded = loadConfig({ cwd: process.cwd(), env: {} });
   const decision = evaluatePolicy(

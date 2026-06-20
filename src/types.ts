@@ -247,6 +247,7 @@ export interface CodingCoverageContract {
   coverage: Record<string, EvidenceCoverageStatus>;
   missing: string[];
   allowed_followups: EvidenceFollowup[];
+  metadata?: Record<string, unknown>;
 }
 
 export interface CoverageCertificate {
@@ -335,6 +336,7 @@ export interface EvidencePacket {
     evidence_tokens_est: number;
     response_tokens_est: number;
   };
+  metadata?: Record<string, unknown>;
   created_at: string;
   expires_at: string;
 }

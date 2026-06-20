@@ -25,6 +25,11 @@ export interface CodingSymbolIndexStats {
   symbolCount: number;
 }
 
+export interface CodingSymbolSearchResult {
+  symbols: CodingSymbol[];
+  indexStats: CodingSymbolIndexStats;
+}
+
 const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".js", ".jsx", ".java", ".py"]);
 const SKIP_DIRS = new Set([
   ".git",
@@ -58,9 +63,14 @@ const CONTROL_WORDS = new Set([
 ]);
 
 export function findCodingSymbols(input: SymbolSearchInput): CodingSymbol[] {
+  return findCodingSymbolsWithStats(input).symbols;
+}
+
+export function findCodingSymbolsWithStats(input: SymbolSearchInput): CodingSymbolSearchResult {
   const query = input.query?.trim() ?? "";
   const queryTokens = tokenizeQuery(query);
-  const symbols = loadCodingSymbolIndex(input.repoRoot).symbols
+  const indexResult = loadCodingSymbolIndexResult(input.repoRoot);
+  const symbols = indexResult.snapshot.symbols
     .filter((symbol) => !input.language || symbol.language === input.language)
     .filter((symbol) => !input.kind || symbol.kind === input.kind)
     .map((symbol) => ({ symbol, score: scoreSymbol(symbol, query, queryTokens) }))
@@ -68,10 +78,18 @@ export function findCodingSymbols(input: SymbolSearchInput): CodingSymbol[] {
     .sort((a, b) => b.score - a.score || a.symbol.file.localeCompare(b.symbol.file) || a.symbol.line - b.symbol.line)
     .slice(0, input.limit ?? 20);
 
-  return symbols.map(({ symbol, score }) => ({
-    ...symbol,
-    confidence: Math.max(symbol.confidence, Math.min(0.96, 0.35 + score / 10))
-  }));
+  return {
+    symbols: symbols.map(({ symbol, score }) => ({
+      ...symbol,
+      confidence: Math.max(symbol.confidence, Math.min(0.96, 0.35 + score / 10))
+    })),
+    indexStats: {
+      cacheHit: indexResult.cacheHit,
+      cachePath: indexResult.cachePath,
+      fileCount: indexResult.snapshot.files.length,
+      symbolCount: indexResult.snapshot.symbols.length
+    }
+  };
 }
 
 export function loadCodingSymbolIndex(repoRoot: string): SymbolIndexSnapshot {

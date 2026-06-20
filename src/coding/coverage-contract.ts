@@ -10,13 +10,14 @@ import type {
   TestNeighborPacket
 } from "../types.js";
 import { parseFailurePacket } from "./failure-packet.js";
-import { buildSymbolPacket, findCodingSymbols, tokenizeQuery } from "./symbol-index.js";
+import { buildSymbolPacket, findCodingSymbolsWithStats, tokenizeQuery } from "./symbol-index.js";
 import { findTestNeighbors } from "./test-neighbors.js";
 
 export interface CompileCodingCoverageInput {
   repoRoot: string;
   task: string;
   taskType: EvidenceTaskType;
+  qualityRubric?: string[];
   firstEvidenceIndex: number;
   hasBuildFacts: boolean;
   codingToolsAvailable: boolean;
@@ -30,6 +31,7 @@ export interface CodingEvidenceResult {
   missing: string[];
   allowedFollowups: EvidenceFollowup[];
   contract: CodingCoverageContract;
+  metadata: Record<string, unknown>;
 }
 
 export function compileCodingCoverageEvidence(input: CompileCodingCoverageInput): CodingEvidenceResult | undefined {
@@ -38,8 +40,9 @@ export function compileCodingCoverageEvidence(input: CompileCodingCoverageInput)
     return undefined;
   }
 
-  const query = extractCodingQuery(input.task);
-  const candidates = findCodingSymbols({ repoRoot: input.repoRoot, query, limit: 12 });
+  const query = extractCodingQuery([input.task, ...(input.qualityRubric ?? [])].join(" "));
+  const search = findCodingSymbolsWithStats({ repoRoot: input.repoRoot, query, limit: 12 });
+  const candidates = search.symbols;
   const symbolPacket = candidates[0] ? buildSymbolPacket({ repoRoot: input.repoRoot, symbolId: candidates[0].id }) : undefined;
   const failurePacket = shouldParseFailure(input.task) ? parseFailurePacket({ output: input.task }) : undefined;
   const exactTargets = extractExactTargetNames(input.task);
@@ -75,7 +78,12 @@ export function compileCodingCoverageEvidence(input: CompileCodingCoverageInput)
     confidence,
     coverage,
     missing,
-    allowed_followups: allowedFollowups
+    allowed_followups: allowedFollowups,
+    metadata: {
+      symbol_index_hit: search.indexStats.cacheHit,
+      symbol_index_file_count: search.indexStats.fileCount,
+      symbol_index_symbol_count: search.indexStats.symbolCount
+    }
   };
 
   return {
@@ -85,7 +93,8 @@ export function compileCodingCoverageEvidence(input: CompileCodingCoverageInput)
     evidence,
     missing,
     allowedFollowups,
-    contract
+    contract,
+    metadata: contract.metadata ?? {}
   };
 }
 

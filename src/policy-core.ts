@@ -278,6 +278,24 @@ function evaluateAgentStop(event: TokenOptEvent, config: TokenOptConfig, runtime
 
 function evaluateGatewayPreToolUse(event: TokenOptEvent, config: TokenOptConfig, runtime: PolicyRuntime): PolicyDecision | undefined {
   const toolName = event.toolName ?? "";
+  if (toolName === "Bash") {
+    const readTarget = extractReadTarget(extractCommand(event.toolInput) ?? "");
+    if (readTarget) {
+      const readDecision = evaluateReadTarget(readTarget, config, runtime.repoRoot);
+      if (readDecision?.action === "deny") {
+        return readDecision;
+      }
+    }
+  } else if (toolName.startsWith("mcp__")) {
+    const readTarget = extractMcpReadTarget(event.toolInput);
+    if (readTarget && /read|get|file|resource/i.test(toolName)) {
+      const readDecision = evaluateReadTarget(readTarget, config, runtime.repoRoot);
+      if (readDecision?.action === "deny") {
+        return readDecision;
+      }
+    }
+  }
+
   const activeEvidence = readActiveEvidenceTaskState(config, runtime.repoRoot);
   if (activeEvidence && isRawSourceAcquisitionTool(toolName)) {
     return gatewayModeDecision(
