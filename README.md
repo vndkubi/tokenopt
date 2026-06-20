@@ -1,6 +1,10 @@
 # TokenOpt CLI
 
-TokenOpt is a reusable context-budget middleware for coding agents. V1 is Codex-first and ships as a global npm CLI, while the core policy engine stays independent from CodeGraph and other repository indexers.
+TokenOpt is a reusable context-budget middleware for coding agents. V1 is Codex-first and packaged as a global npm CLI, while the core policy engine stays independent from CodeGraph and other repository indexers.
+
+Naming: the repository is `vndkubi/contextgate` for historical searchability. The product, npm package, and executable are TokenOpt: `@tokenopt/cli` and `tokenopt`. ContextGate is the broker/gate concept exposed through tools such as `contextgate_get_context`.
+
+Current status: `0.1.0` is early-alpha. Build from this repository until `@tokenopt/cli` is published to npm. The project is MIT licensed; see [LICENSE](LICENSE), [SECURITY.md](SECURITY.md), and [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Install Locally
 
@@ -8,6 +12,8 @@ Full setup guide: [SETUP.md](SETUP.md).
 Copilot-specific setup: [COPILOT_SETUP.md](COPILOT_SETUP.md).
 Project idea and architecture: [PROJECT_OVERVIEW.md](PROJECT_OVERVIEW.md).
 Prompt and benchmark-backed routing playbook: [PROMPT_PLAYBOOK.md](PROMPT_PLAYBOOK.md).
+
+Until an npm release is published, use the local build path:
 
 ```bash
 npm install
@@ -95,6 +101,8 @@ tokenopt_symbol_packet
 tokenopt_test_neighbors
 tokenopt_failure_packet
 ```
+
+The Java/Spring helpers are optional full-mode tools for Java-heavy repos. They are not required for the language-agnostic broker, search, read, policy, and compression flow.
 
 In this mode, shell commands, searches, and file reads can be routed through TokenOpt-controlled tools that deny broad reads/searches, return bounded file slices, compress command output, and preserve raw logs under the user cache.
 
@@ -216,6 +224,10 @@ node dist/cli.js benchmark suite --suite examples/contextgate-37-prompt-suite.ex
 Quality is scored by deterministic rubric checks against the generated benchmark answer. This measures the acquisition layer and answer-readiness directly. It does not replace a full model E2E judge; use it to verify whether TokenOpt reduces evidence replay before running agent-level A/B tests.
 
 For daily TokenOpt + CodeGraph comparisons, `tokenopt-codegraph-adaptive` routes review/security/missing-artifact tasks through TokenOpt-only and uses compact TokenOpt+CodeGraph with shell disabled for flow, implementation, and refactor tasks. Use `tokenopt-codegraph-natural` when you want a production-like natural prompt benchmark: TokenOpt is exposed as a broker, CodeGraph is exposed as structured source/graph evidence, and the prompt gives route/budget guardrails instead of a fixed tool sequence. Suite reports include raw total tokens, fresh tokens, and quality per 10k fresh tokens.
+
+CodeGraph is optional. For benchmark modes that use it, set `TOKENOPT_CODEGRAPH_ROOT` to a local checkout or `TOKENOPT_CODEGRAPH_CLI` to a built CLI path. If CodeGraph is unavailable, use TokenOpt-only or `contextgate-natural` modes and report that scope honestly.
+
+Treat current benchmark reports as project-owned measurements until they are repeated on third-party repositories with raw logs available. When comparing modes, prefer raw total, fresh total, timeout status, quality score, and fallback-after-answerable over a single percentage delta.
 
 For agent-level measurement through the real Codex CLI:
 

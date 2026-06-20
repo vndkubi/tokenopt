@@ -2,6 +2,23 @@
   "name": "@tokenopt/cli",
   "version": "0.1.0",
   "description": "Reusable context-budget middleware for coding agents and repository hooks.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vndkubi/contextgate.git"
+  },
+  "homepage": "https://github.com/vndkubi/contextgate#readme",
+  "bugs": {
+    "url": "https://github.com/vndkubi/contextgate/issues"
+  },
+  "keywords": [
+    "coding-agent",
+    "mcp",
+    "context-engineering",
+    "token-optimization",
+    "codex",
+    "copilot"
+  ],
   "type": "module",
   "bin": {
     "tokenopt": "dist/cli.js"
@@ -13,6 +30,8 @@
     "SETUP.md",
     "COPILOT_SETUP.md",
     "PROJECT_OVERVIEW.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
     "PROMPT_PLAYBOOK.md",
     "tokenopt-separation-and-mcp-plan.md"
   ],
