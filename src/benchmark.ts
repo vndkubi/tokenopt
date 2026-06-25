@@ -157,7 +157,38 @@ const DAILY_TASKS: BenchmarkTask[] = [
     label: "Code review round 1 (business)",
     taskType: "review_diff",
     prompt:
-      "Review this change for business correctness: identify which modules are affected, what business rules the change touches, whether requirement coverage is complete, and flag any missing edge cases or breaking changes.",
+      "Review this change for business correctness.\n\n" +
+      "Diff:\n" +
+      "```diff\n" +
+      "--- a/src/service/UserService.java\n" +
+      "+++ b/src/service/UserService.java\n" +
+      "@@ -42,7 +42,10 @@ public class UserService {\n" +
+      "     public User findById(Long id) {\n" +
+      "-        return userRepository.findById(id).orElseThrow();\n" +
+      "+        User user = userRepository.findById(id).orElseThrow();\n" +
+      "+        if (!user.isActive()) {\n" +
+      "+            throw new UserInactiveException(\"User \" + id + \" is inactive\");\n" +
+      "+        }\n" +
+      "+        return user;\n" +
+      "     }\n" +
+      "--- a/src/service/OrderService.java\n" +
+      "+++ b/src/service/OrderService.java\n" +
+      "@@ -18,3 +18,4 @@ public class OrderService {\n" +
+      "     public Order createOrder(Long userId, List<Item> items) {\n" +
+      "-        User user = userService.findById(userId);\n" +
+      "+        User user = userService.findById(userId); // now throws UserInactiveException\n" +
+      "         return new Order(user, items);\n" +
+      "     }\n" +
+      "--- a/src/controller/UserController.java\n" +
+      "+++ b/src/controller/UserController.java\n" +
+      "@@ -31,2 +31,5 @@ public class UserController {\n" +
+      "+    @ExceptionHandler(UserInactiveException.class)\n" +
+      "+    public ResponseEntity<String> handleInactive(UserInactiveException ex) {\n" +
+      "+        return ResponseEntity.status(403).body(ex.getMessage());\n" +
+      "+    }\n" +
+      "```\n\n" +
+      "Identify which modules are affected, what business rules the change touches, " +
+      "whether requirement coverage is complete, and flag any missing edge cases or breaking changes.",
     qualityRubric: ["identify affected modules", "state business rules touched", "flag missing cases or risks"],
     oracleRubric: [
       "identify affected modules",
