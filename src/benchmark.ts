@@ -20,7 +20,9 @@ type BenchmarkMode =
   | "router-shadow-gate"
   | "router-shadow-gate+compressors"
   | "gold-packet"
-  | "oracle-packet";
+  | "oracle-packet"
+  | "codegraph-only"
+  | "tokenopt-codegraph";
 type BenchmarkTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest" | "review-diff";
 
 interface BenchmarkTask {
@@ -93,7 +95,9 @@ const ALL_MODES: BenchmarkMode[] = [
   "router-shadow-gate",
   "router-shadow-gate+compressors",
   "gold-packet",
-  "oracle-packet"
+  "oracle-packet",
+  "codegraph-only",
+  "tokenopt-codegraph"
 ];
 const DAILY_TASKS: BenchmarkTask[] = [
   {
@@ -343,7 +347,9 @@ function parseBenchmarkMode(value: string): BenchmarkMode {
     value === "router-shadow-gate" ||
     value === "router-shadow-gate+compressors" ||
     value === "gold-packet" ||
-    value === "oracle-packet"
+    value === "oracle-packet" ||
+    value === "codegraph-only" ||
+    value === "tokenopt-codegraph"
   ) {
     return value;
   }
@@ -361,6 +367,9 @@ function parseBenchmarkTask(value: string): BenchmarkTask {
 async function runDailyMode(repo: string, task: BenchmarkTask, mode: BenchmarkMode): Promise<BenchmarkRow> {
   if (mode === "baseline") {
     return runBaselineDaily(repo, task);
+  }
+  if (mode === "codegraph-only") {
+    return runCodeGraphOnly(repo, task);
   }
   return runMcpDaily(repo, task, mode);
 }
@@ -440,9 +449,7 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
     const compilePacket = structured?.packetSummary ?? structured?.packet;
     const answerable = compilePacket?.answerable ?? /answerable:\s*true/.test(compileText);
     const packetRoute = compilePacket?.route;
-    const signals = signalsFromCompiledPacket(compileText);
-    const answer = renderAnswer(task, signals, mode);
-    const quality = scoreAnswer(task, answer, signals);
+    let signals = signalsFromCompiledPacket(compileText);
     let toolCalls = 1;
     let mcpCalls = 1;
     let shellCalls = 0;
@@ -452,6 +459,30 @@ async function runMcpDaily(repo: string, task: BenchmarkTask, mode: Exclude<Benc
     let estimatedTokensAvoided = 0;
     let redundantCallRate = 0;
     let notes = `artifact_dir=${artifactDir}`;
+
+    if (mode === "tokenopt-codegraph") {
+      try {
+        const { client: cgClient, close: cgClose } = await createCodeGraphMcpClient(repo);
+        try {
+          const cgArgs = { task: task.prompt };
+          const cgResult = await cgClient.callTool({ name: "codegraph_context", arguments: cgArgs });
+          const cgText = toolText(cgResult);
+          toolCalls += 1;
+          mcpCalls += 1;
+          toolInputChars += JSON.stringify(cgArgs).length;
+          toolOutputChars += cgText.length;
+          signals = mergeCodeGraphSignals(signals, cgText);
+          notes = `${notes}; codegraph_chars=${cgText.length}`;
+        } finally {
+          await cgClose();
+        }
+      } catch (err) {
+        notes = `${notes}; codegraph_error=${err instanceof Error ? err.message : String(err)}`;
+      }
+    }
+
+    const answer = renderAnswer(task, signals, mode);
+    const quality = scoreAnswer(task, answer, signals);
 
     if (
       mode === "compiled-packet+gate" ||
@@ -563,6 +594,132 @@ function buildRow(input: {
     answer: input.answer,
     notes: `${input.notes}; failed_checks=${input.quality.checks.filter((check) => !check.passed).map((check) => check.name).join(",") || "none"}`
   };
+}
+
+function getCodeGraphCliPath(): string {
+  const envPath = process.env.CODEGRAPH_CLI_PATH;
+  if (envPath) return envPath;
+  // assume sibling directory: <tokenopt>/../code-graph/dist/cli.js
+  const tokenoptRoot = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  return path.join(tokenoptRoot, "..", "code-graph", "dist", "cli.js");
+}
+
+async function createCodeGraphMcpClient(repo: string): Promise<{ client: Client; close: () => Promise<void> }> {
+  const cgCli = getCodeGraphCliPath();
+  if (!fs.existsSync(cgCli)) {
+    throw new Error(`CodeGraph CLI not found at ${cgCli}. Set CODEGRAPH_CLI_PATH env var.`);
+  }
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [cgCli, "mcp", "--root", repo],
+    cwd: repo,
+    env: Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined)) as Record<string, string>
+  });
+  const client = new Client({ name: "tokenopt-benchmark-codegraph", version: "0.0.0" });
+  await client.connect(transport);
+  return { client, close: async () => { await client.close(); } };
+}
+
+function signalsFromCodeGraphText(text: string): Partial<RepoSignals> {
+  // Try to extract from JSON-like structure
+  const filePaths: string[] = [];
+  const sourceDirs: string[] = [];
+  const facts: string[] = [];
+
+  // Extract file paths: patterns like "path": "src/..." or bare paths with extensions
+  for (const match of text.matchAll(/"path"\s*:\s*"([^"]+\.\w{1,6})"/g)) {
+    filePaths.push(match[1]);
+  }
+  for (const match of text.matchAll(/\b((?:src|backend|frontend|main\/java|test\/java|tests?)\/[\w/\-.]+\.\w{1,6})\b/g)) {
+    if (!filePaths.includes(match[1])) filePaths.push(match[1]);
+  }
+
+  // Extract source_dirs
+  for (const match of text.matchAll(/"source_dirs"\s*:\s*\[([^\]]+)\]/g)) {
+    for (const part of match[1].split(",")) {
+      const dir = part.replace(/[" \n\r]/g, "");
+      if (dir) sourceDirs.push(dir);
+    }
+  }
+  if (sourceDirs.length === 0) {
+    for (const f of filePaths) {
+      const parts = f.split("/");
+      if (parts.length >= 2) sourceDirs.push(parts.slice(0, Math.min(3, parts.length - 1)).join("/"));
+    }
+  }
+
+  // Extract _codegraph_meta counts
+  const symMatch = text.match(/"symbols_returned"\s*:\s*(\d+)/);
+  const fileMatch = text.match(/"files_returned"\s*:\s*(\d+)/);
+  const edgeMatch = text.match(/"call_edges_returned"\s*:\s*(\d+)/);
+  if (symMatch) facts.push(`codegraph_symbols_returned=${symMatch[1]}`);
+  if (fileMatch) facts.push(`codegraph_files_returned=${fileMatch[1]}`);
+  if (edgeMatch) facts.push(`codegraph_call_edges_returned=${edgeMatch[1]}`);
+
+  return {
+    facts,
+    importantFiles: [...new Set(filePaths)].slice(0, 12),
+    sourceDirs: [...new Set(sourceDirs)].slice(0, 6)
+  };
+}
+
+function mergeCodeGraphSignals(base: RepoSignals, cgText: string): RepoSignals {
+  const cg = signalsFromCodeGraphText(cgText);
+  return {
+    ...base,
+    facts: [...base.facts, ...(cg.facts ?? [])],
+    importantFiles: [...new Set([...base.importantFiles, ...(cg.importantFiles ?? [])])].slice(0, 20),
+    sourceDirs: base.sourceDirs.length > 0
+      ? base.sourceDirs
+      : (cg.sourceDirs ?? [])
+  };
+}
+
+async function runCodeGraphOnly(repo: string, task: BenchmarkTask): Promise<BenchmarkRow> {
+  const mode: BenchmarkMode = "codegraph-only";
+  const { client, close } = await createCodeGraphMcpClient(repo);
+  const cgArgs = { task: task.prompt };
+  try {
+    const cgResult = await client.callTool({ name: "codegraph_context", arguments: cgArgs });
+    const cgText = toolText(cgResult);
+    const cgPartial = signalsFromCodeGraphText(cgText);
+    const signals: RepoSignals = {
+      facts: cgPartial.facts ?? [],
+      topDirs: cgPartial.sourceDirs ?? [],
+      sourceDirs: cgPartial.sourceDirs ?? [],
+      testDirs: [],
+      configFiles: [],
+      importantFiles: cgPartial.importantFiles ?? [],
+      rootFiles: []
+    };
+    const answer = renderAnswer(task, signals, mode);
+    const quality = scoreAnswer(task, answer, signals);
+    const toolInputChars = JSON.stringify(cgArgs).length;
+    const toolOutputChars = cgText.length;
+    const estTokens = estimateTokens(toolInputChars + toolOutputChars + answer.length);
+    return buildRow({
+      repo,
+      task,
+      mode,
+      answerable: true,
+      toolCalls: 1,
+      mcpCalls: 1,
+      shellCalls: 0,
+      toolInputChars,
+      toolOutputChars,
+      fallbackAfterAnswerable: 0,
+      estimatedTokensAvoided: 0,
+      redundantCallRate: 0,
+      routeDecision: "codegraph",
+      routeReason: "codegraph-only mode",
+      routerRegret: "none",
+      answer,
+      quality,
+      notes: `codegraph_chars=${cgText.length}`
+    });
+  } finally {
+    await close();
+  }
 }
 
 async function createMcpClient(
