@@ -294,11 +294,23 @@ export interface EvidenceItem {
   tokens_est?: number;
 }
 
+export type EvidenceToolCategory =
+  | "code_graph"       // call-chain tracing, symbol lookup, impact analysis
+  | "code_ownership"   // which file/class/module owns a concept
+  | "file_read"        // exact file content read by known path
+  | "search"           // broad symbol or text search across repo
+  | "external_source"; // fetch from Jira, GitHub, issue tracker, etc.
+
 export interface EvidenceFollowup {
   tool: string;
   reason: string;
   args?: Record<string, unknown>;
   max_output_tokens?: number;
+  // Generic slot descriptor so any tool matching tool_categories works.
+  // Agent should use whatever available tool fits tool_categories,
+  // not necessarily the named `tool` above.
+  evidence_slot?: string;
+  tool_categories?: EvidenceToolCategory[];
 }
 
 export interface EvidenceAnswerContract {

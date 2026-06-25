@@ -21,7 +21,7 @@ type BenchmarkMode =
   | "router-shadow-gate+compressors"
   | "gold-packet"
   | "oracle-packet";
-type BenchmarkTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest";
+type BenchmarkTaskId = "build-handoff" | "investigate" | "research-business" | "implement" | "write-unittest" | "review-diff";
 
 interface BenchmarkTask {
   id: BenchmarkTaskId;
@@ -151,6 +151,22 @@ const DAILY_TASKS: BenchmarkTask[] = [
     qualityRubric: ["identify test locations", "give targeted test command", "state assertion focus"],
     oracleRubric: ["identify test locations", "give targeted test command", "state assertion focus", "cite build context"],
     redundantPattern: "test"
+  },
+  {
+    id: "review-diff",
+    label: "Code review round 1 (business)",
+    taskType: "review_diff",
+    prompt:
+      "Review this change for business correctness: identify which modules are affected, what business rules the change touches, whether requirement coverage is complete, and flag any missing edge cases or breaking changes.",
+    qualityRubric: ["identify affected modules", "state business rules touched", "flag missing cases or risks"],
+    oracleRubric: [
+      "identify affected modules",
+      "state business rules touched",
+      "flag missing cases or risks",
+      "cite specific files/symbols",
+      "distinguish confirmed from inferred impact"
+    ],
+    redundantPattern: "src"
   }
 ];
 
@@ -645,10 +661,11 @@ function signalsFromBaseline(
 }
 
 function signalsFromCompiledPacket(text: string): RepoSignals {
-  const facts = [
-    ...[...text.matchAll(/^\s*fact:\s*(.+)$/gm)].map((match) => match[1].trim()),
-    ...[...text.matchAll(/^\s*facts=(.+)$/gm)].flatMap((match) => match[1].split("|").map((item) => item.trim()))
-  ].filter(Boolean);
+  const fullFacts = [...text.matchAll(/^\s*fact:\s*(.+)$/gm)].map((match) => match[1].trim());
+  const compactFacts = [...text.matchAll(/^\s*facts=(.+)$/gm)].flatMap((match) =>
+    match[1].split("|").map((item) => item.trim()).filter(Boolean)
+  );
+  const facts = [...new Set([...fullFacts, ...compactFacts])];
   const topDirs = splitFactList(firstFactValue(facts, "top_dirs")).map((item) => item.replace(/:\d+$/, ""));
   const sourceDirs = splitFactList(firstFactValue(facts, "source_dirs")).map((item) => item.replace(/:\d+$/, ""));
   const testDirs = splitFactList(firstFactValue(facts, "test_dirs")).map((item) => item.replace(/:\d+$/, ""));
@@ -657,6 +674,8 @@ function signalsFromCompiledPacket(text: string): RepoSignals {
   const overviewTitle = firstFactValue(facts, "overview_title");
   const overviewSummary = firstFactValue(facts, "overview_summary");
   const overviewFile = firstFactValue(facts, "overview_file");
+  // Extract rootFiles from important_file_sample — filter to entries with no directory separator
+  const rootFiles = importantFiles.filter((f) => !f.includes("/") && !f.includes("\\")).slice(0, 20);
   return {
     facts,
     buildTool: firstFactValue(facts, "build_tool"),
@@ -669,7 +688,7 @@ function signalsFromCompiledPacket(text: string): RepoSignals {
     testDirs,
     configFiles,
     importantFiles,
-    rootFiles: []
+    rootFiles
   };
 }
 
@@ -872,6 +891,21 @@ function renderAnswer(task: BenchmarkTask, signals: RepoSignals, mode: Benchmark
     ].join("\n");
   }
 
+  if (task.id === "review-diff") {
+    const affectedModules = compactList(signals.sourceDirs.slice(0, 4)) || compactList(signals.topDirs.slice(0, 4)) || "not detected";
+    const keyFiles = compactList(signals.importantFiles.slice(0, 6)) || "not detected";
+    return [
+      `Task: ${task.label}`,
+      `Mode: ${mode}`,
+      `Affected modules: ${affectedModules}`,
+      `Business rules touched: domain logic in ${project}; changes to ${affectedModules} may affect business invariants — verify against requirement.`,
+      `Key files: ${keyFiles}`,
+      `Missing cases / risks: edge cases around boundary conditions and error paths should be verified; confirm integration tests cover the changed behavior.`,
+      `Breaking changes: check callers of changed symbols in ${affectedModules}; any public API change needs downstream review.`,
+      `Evidence: ${evidence}`
+    ].join("\n");
+  }
+
   return [
     `Task: ${task.label}`,
     `Mode: ${mode}`,
@@ -915,6 +949,14 @@ function scoreAnswer(task: BenchmarkTask, answer: string, signals: RepoSignals):
       { name: "test_strategy", passed: /Test strategy:/i.test(answer) },
       { name: "risks", passed: /Risks:/i.test(answer) }
     );
+  } else if (task.id === "review-diff") {
+    checks.push(
+      { name: "affected_modules", passed: /Affected modules:/i.test(answer) && (signals.sourceDirs.length > 0 || signals.topDirs.length > 0) },
+      { name: "business_rules", passed: /Business rules touched:/i.test(answer) },
+      { name: "key_files", passed: /Key files:/i.test(answer) && signals.importantFiles.length > 0 },
+      { name: "missing_cases_or_risks", passed: /Missing cases|risks/i.test(answer) },
+      { name: "breaking_changes", passed: /Breaking changes:/i.test(answer) }
+    );
   } else {
     checks.push(
       { name: "test_locations", passed: /Unit test plan:/i.test(answer) && (signals.testDirs.length > 0 || signals.sourceDirs.length > 0) },
@@ -942,6 +984,9 @@ function hasMinimumSignals(task: BenchmarkTask, signals: RepoSignals): boolean {
   }
   if (task.id === "write-unittest") {
     return Boolean(signals.buildTool && (signals.testDirs.length > 0 || signals.sourceDirs.length > 0));
+  }
+  if (task.id === "review-diff") {
+    return Boolean(signals.sourceDirs.length > 0 || signals.topDirs.length > 0);
   }
   return Boolean(signals.buildTool);
 }
@@ -1100,6 +1145,6 @@ function formatBenchmark(rows: BenchmarkRow[], showAnswers: boolean): string {
 
 function benchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest] [--mode baseline|compiled-packet|compiled-shadow-gate|compiled-packet+gate|router-best|router-shadow-gate|router-shadow-gate+compressors|gold-packet|oracle-packet|all] [--repeat <n>] [--randomize] [--json] [--show-answers] [--out <path>]
+  tokenopt benchmark daily --repo <path> [--repo <path>] [--task all|build-handoff|investigate|research-business|implement|write-unittest|review-diff] [--mode baseline|compiled-packet|compiled-shadow-gate|compiled-packet+gate|router-best|router-shadow-gate|router-shadow-gate+compressors|gold-packet|oracle-packet|all] [--repeat <n>] [--randomize] [--json] [--show-answers] [--out <path>]
 `;
 }

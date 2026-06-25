@@ -71,8 +71,22 @@ const FULL_MCP_TOOL_NAMES = new Set([
   "tokenopt_symbol_packet",
   "tokenopt_test_neighbors",
   "tokenopt_failure_packet",
-  "tokenopt_tracebug_packet"
+  "tokenopt_tracebug_packet",
+  "tokenopt_session_stats"
 ]);
+
+interface McpSessionStats {
+  calls: number;
+  evidenceTokensEst: number;
+  inventoryTokensAvoided: number;
+  startedAt: string;
+}
+const SESSION_STATS: McpSessionStats = {
+  calls: 0,
+  evidenceTokensEst: 0,
+  inventoryTokensAvoided: 0,
+  startedAt: new Date().toISOString()
+};
 
 interface RepoInventory {
   totalFiles: number;
@@ -616,6 +630,23 @@ export async function runMcpServer(): Promise<void> {
           idempotentHint: true,
           openWorldHint: false
         }
+      },
+      {
+        name: "tokenopt_session_stats",
+        title: "Session Token Savings",
+        description: "Return cumulative token savings for this MCP session. Call at end of task to see how many tokens contextgate replaced vs raw exploration.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+          additionalProperties: false
+        },
+        annotations: {
+          title: "TokenOpt session stats",
+          readOnlyHint: true,
+          destructiveHint: false,
+          idempotentHint: true,
+          openWorldHint: false
+        }
       }
   ];
 
@@ -665,6 +696,8 @@ export async function runMcpServer(): Promise<void> {
           return failurePacketTool(args);
         case "tokenopt_tracebug_packet":
           return tracebugPacketTool(args);
+        case "tokenopt_session_stats":
+          return sessionStatsTool();
         default:
           return textResult(`Unknown TokenOpt tool: ${request.params.name}`, true);
       }
@@ -731,9 +764,15 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       : undefined,
     "- Prefer exact source slices for named files/symbols over broad search, and report any still-missing slots honestly."
   ].filter((line): line is string => Boolean(line)).join("\n");
+  const avoided = (result.structuredContent as Record<string, unknown> | undefined)?.estimatedTokensAvoided as number | undefined ?? 0;
+  SESSION_STATS.calls += 1;
+  SESSION_STATS.evidenceTokensEst += (result.structuredContent as Record<string, unknown> | undefined)?.evidenceTokensEst as number | undefined ?? 0;
+  SESSION_STATS.inventoryTokensAvoided += avoided;
+  writeDailyStats(avoided, taskType);
+  const savingsLine = `\n---\nTokenOpt: ~${avoided} tokens saved this call vs raw exploration | session: ${SESSION_STATS.calls} call(s), ~${SESSION_STATS.inventoryTokensAvoided} total tokens saved`;
   return {
     ...result,
-    content: [{ type: "text" as const, text }],
+    content: [{ type: "text" as const, text: text + savingsLine }],
     structuredContent: {
       ...(result.structuredContent ?? {}),
       broker: "contextgate",
@@ -6967,4 +7006,60 @@ function resolveRepoPath(repoRoot: string, requestedPath: string): { ok: true; p
     return { ok: false, error: `Path does not exist: ${requestedPath}` };
   }
   return { ok: true, path: absolute };
+}
+
+function getDailyStatsPath(): string {
+  const home = process.env.USERPROFILE ?? process.env.HOME ?? ".";
+  const dir = path.join(home, ".tokenopt", "stats");
+  fs.mkdirSync(dir, { recursive: true });
+  const date = new Date().toISOString().slice(0, 10);
+  return path.join(dir, `${date}.jsonl`);
+}
+
+function writeDailyStats(tokensAvoided: number, taskType: string): void {
+  try {
+    const entry = JSON.stringify({ ts: new Date().toISOString(), tokensAvoided, taskType });
+    fs.appendFileSync(getDailyStatsPath(), `${entry}\n`, "utf8");
+  } catch {
+    // ignore — stats write failure must not break the tool response
+  }
+}
+
+function sessionStatsTool() {
+  const daily = readDailyStats();
+  const lines = [
+    `session_calls: ${SESSION_STATS.calls}`,
+    `session_tokens_avoided: ~${SESSION_STATS.inventoryTokensAvoided}`,
+    `session_evidence_tokens_est: ~${SESSION_STATS.evidenceTokensEst}`,
+    `session_started: ${SESSION_STATS.startedAt}`,
+    "",
+    "Today's stats:",
+    `  calls:          ${daily.calls}`,
+    `  tokens_avoided: ${daily.tokensAvoided}`,
+    ...Object.entries(daily.taskTypes).map(([k, v]) => `  ${k}: ${v}`)
+  ];
+  return textResult(lines.join("\n"), false);
+}
+
+interface DailyStats {
+  calls: number;
+  tokensAvoided: number;
+  taskTypes: Record<string, number>;
+}
+
+function readDailyStats(): DailyStats {
+  const result: DailyStats = { calls: 0, tokensAvoided: 0, taskTypes: {} };
+  try {
+    const raw = fs.readFileSync(getDailyStatsPath(), "utf8");
+    for (const line of raw.trim().split("\n")) {
+      if (!line) continue;
+      const entry = JSON.parse(line) as { tokensAvoided?: number; taskType?: string };
+      result.calls += 1;
+      result.tokensAvoided += entry.tokensAvoided ?? 0;
+      if (entry.taskType) result.taskTypes[entry.taskType] = (result.taskTypes[entry.taskType] ?? 0) + 1;
+    }
+  } catch {
+    // first run or no stats yet
+  }
+  return result;
 }
