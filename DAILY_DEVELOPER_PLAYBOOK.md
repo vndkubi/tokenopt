@@ -63,6 +63,23 @@ If any check fails, use the no-CodeGraph prompts below or the hybrid route with 
 
 When setup/index fails or the snapshot is stale, treat CodeGraph evidence as unavailable. Do not run `codegraph-only` for broad tasks; switch to TokenOpt + native bounded fallback.
 
+## Session Token Savings
+
+Each `contextgate_get_context` call appends an inline savings line:
+
+```
+---
+TokenOpt: ~8 400 tokens saved this call vs raw exploration | session: 3 call(s), ~24 000 total tokens saved
+```
+
+To see a 30-day dashboard across all sessions:
+
+```bash
+tokenopt report
+```
+
+Raw stats are persisted per day at `~/.tokenopt/stats/YYYY-MM-DD.jsonl`. Call `tokenopt_session_stats` (full MCP mode) at the end of any task to see accumulated session savings without leaving the agent.
+
 ## Hard Budgets
 
 Use these as default prompt budgets:
@@ -76,7 +93,9 @@ Use these as default prompt budgets:
 | E2E trace flow | 1 CodeGraph flow pack + 1 exact missing-edge followup | 3 shell calls | Entrypoint, ordered sequence, tests, inferred edges known. |
 | Performance analysis | 1 TokenOpt slot packet + 1 CodeGraph flow/change pack | 3 shell calls | Cost model, measurement points, validation known. |
 | Security audit | 1 security/review packet | 2 shell calls | Findings/non-findings, boundary checks, missing coverage known. |
-| Code review | 1 review packet or diff-first narrow reads | 2 shell calls | Findings, business impact, similar logic, missing tests known. |
+| Code review round 1 (business) | 1 `contextgate_get_context` (task_type=review_diff) + 1 CodeGraph get_change_pack | 2 shell calls | Business impact, requirement coverage, impacted files known. |
+| Code review round 2 (technical) | No MCPs — direct diff review | 0 shell calls | YAGNI/KISS findings documented. |
+| Code review round 3 (checklist) | 1 CodeGraph get_change_pack only | 0 shell calls | Checklist items resolved against changed files. |
 | Refactor planning | 1 CodeGraph change/flow pack + 1 exact followup | 3 shell calls | Behavior invariants and validation plan known. |
 
 Fallback hard stop:

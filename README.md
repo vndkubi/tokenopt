@@ -100,7 +100,10 @@ tokenopt_symbols_find
 tokenopt_symbol_packet
 tokenopt_test_neighbors
 tokenopt_failure_packet
+tokenopt_session_stats
 ```
+
+`tokenopt_session_stats` returns cumulative token savings for the current MCP session. Each `contextgate_get_context` call also appends an inline savings line to its response (e.g. `~8 400 tokens saved this call | session: 3 call(s), ~24 000 total tokens saved`) and writes a JSONL entry to `~/.tokenopt/stats/YYYY-MM-DD.jsonl`. Run `tokenopt report` to see a 30-day savings dashboard across all sessions.
 
 The Java/Spring helpers are optional full-mode tools for Java-heavy repos. They are not required for the language-agnostic broker, search, read, policy, and compression flow.
 
@@ -213,6 +216,7 @@ investigate
 research-business
 implement
 write-unittest
+review-diff
 ```
 
 The complete research suite is available at `examples/contextgate-37-prompt-suite.example.json` and can be run with:
