@@ -49,7 +49,8 @@ export const DEFAULT_CONFIG: TokenOptConfig = {
     installScope: "repo"
   },
   codegraph: {
-    enabled: false
+    enabled: false,
+    cliPath: undefined
   }
 };
 
@@ -140,6 +141,9 @@ function applyEnvOverrides(config: TokenOptConfig, env: NodeJS.ProcessEnv): Toke
     if (mode === "hard" || mode === "shadow" || mode === "off") {
       next.policy.gateway.mode = mode;
     }
+  }
+  if (env.TOKENOPT_CODEGRAPH_CLI) {
+    next.codegraph.cliPath = env.TOKENOPT_CODEGRAPH_CLI.trim();
   }
   return next;
 }

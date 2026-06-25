@@ -118,6 +118,10 @@ export function isContextGateTool(toolName: string | undefined): boolean {
   return Boolean(toolName && /(?:contextgate_get_context|tokenopt_compile_evidence)/i.test(toolName));
 }
 
+export function isCodeGraphTool(toolName: string | undefined): boolean {
+  return Boolean(toolName && /(?:codegraph_context|codegraph_slice)/i.test(toolName));
+}
+
 export function isRawSourceAcquisitionTool(toolName: string | undefined): boolean {
   if (!toolName || isRequirementTool(toolName) || isContextGateTool(toolName)) {
     return false;

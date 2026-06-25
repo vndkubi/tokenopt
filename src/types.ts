@@ -105,6 +105,7 @@ export interface TokenOptConfig {
   codegraph: {
     enabled: boolean;
     mcpServer?: string;
+    cliPath?: string;
   };
 }
 

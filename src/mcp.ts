@@ -5,6 +5,8 @@ import { spawnSync } from "node:child_process";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { callCodeGraphBridge } from "./codegraph-bridge.js";
+import { resolveCodeGraphCli } from "./codegraph-discovery.js";
 import { assembleSpringContext } from "./assemblers/spring-context-assembler.js";
 import { compileCodingCoverageEvidence } from "./coding/coverage-contract.js";
 import { parseFailurePacket } from "./coding/failure-packet.js";
@@ -18,7 +20,7 @@ import {
   readEvidenceCacheEntry,
   writeEvidenceCacheEntry
 } from "./evidence-cache.js";
-import { readActiveEvidenceTaskState, writeEvidenceTaskState } from "./evidence-state.js";
+import { readActiveEvidenceTaskState, readEvidenceTaskState, writeEvidenceTaskState } from "./evidence-state.js";
 import { executeWrappedShellCommand } from "./exec.js";
 import { filterJakartaAnnotations } from "./filters/jakarta-annotation-filter.js";
 import { compressText } from "./log-compressor.js";
@@ -665,7 +667,7 @@ export async function runMcpServer(): Promise<void> {
     try {
       switch (request.params.name) {
         case "contextgate_get_context":
-          return contextGateGetContextTool(args, mcpMode);
+          return await contextGateGetContextTool(args, mcpMode);
         case "tokenopt_compile_evidence":
           return compileEvidenceTool(args, mcpMode);
         case "tokenopt_run_command":
@@ -709,7 +711,7 @@ export async function runMcpServer(): Promise<void> {
   await server.connect(new StdioServerTransport());
 }
 
-function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
+async function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMode = "lite") {
   const task = sanitizeTaskPrompt(requiredString(args, "task"));
   const externalArtifacts = parseExternalArtifacts(args);
   const taskWithExternalArtifacts = appendExternalArtifactContext(task, externalArtifacts);
@@ -728,7 +730,33 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
   const originalText = typeof result.content[0]?.text === "string" ? result.content[0].text : "";
   const baseStrictGaps = contextGateStrictGaps(result.structuredContent, requiredSlots);
   const inlineEvidence = buildContextGateInlineEvidence(result.structuredContent, loaded.repoRoot, taskWithExternalArtifacts, requiredSlots, optionalNumber(args, "budget_tokens"), qualityRubric);
-  const strictGaps = inlineEvidence.slices.length > 0 ? inlineEvidence.strictMissingSlots : baseStrictGaps;
+  let strictGaps = inlineEvidence.slices.length > 0 ? inlineEvidence.strictMissingSlots : baseStrictGaps;
+
+  // Internal CodeGraph enrichment: when codegraph.enabled=true and a CLI is available,
+  // call CodeGraph as an internal subprocess for any packet that has a code_graph followup gap,
+  // then fold results into the response so the model sees a single combined packet.
+  let codeGraphEnrichment: Awaited<ReturnType<typeof callCodeGraphBridge>> = null;
+  const codeGraphCli = loaded.config.codegraph.enabled
+    ? resolveCodeGraphCli(loaded.config, process.cwd())
+    : null;
+
+  // Read the evidence state written by compileEvidenceTool to get the full packet with tool_categories
+  const freshPacketState = loaded.config.codegraph.enabled
+    ? readEvidenceTaskState(loaded.config, loaded.repoRoot)
+    : undefined;
+  const packetHasCodeGraphGap = freshPacketState?.packet.allowed_followups.some(
+    (f) => f.tool_categories?.includes("code_graph")
+  ) ?? false;
+
+  if (loaded.config.codegraph.enabled && codeGraphCli && packetHasCodeGraphGap) {
+    const budgetForBridge = Math.min(optionalNumber(args, "budget_tokens") ?? 1600, 2000);
+    codeGraphEnrichment = await callCodeGraphBridge(taskWithExternalArtifacts, codeGraphCli, budgetForBridge);
+    if (codeGraphEnrichment) {
+      // If CodeGraph answered the code_graph gap, remove it from strictGaps
+      strictGaps = strictGaps.filter(g => !g.toLowerCase().includes("symbol") && !g.toLowerCase().includes("flow") && !g.toLowerCase().includes("caller"));
+    }
+  }
+
   const effectiveAnswerable = strictGaps.length === 0 && (contextGateBaseAnswerable(result.structuredContent) || inlineEvidence.slices.length > 0);
   const refillFocusTerms = uniqueStrings([
     ...inlineEvidence.focusTerms,
@@ -770,9 +798,14 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
   SESSION_STATS.inventoryTokensAvoided += avoided;
   writeDailyStats(avoided, taskType);
   const savingsLine = `\n---\nTokenOpt: ~${avoided} tokens saved this call vs raw exploration | session: ${SESSION_STATS.calls} call(s), ~${SESSION_STATS.inventoryTokensAvoided} total tokens saved`;
+
+  const codeGraphSection = codeGraphEnrichment
+    ? formatCodeGraphEnrichment(codeGraphEnrichment)
+    : undefined;
+
   return {
     ...result,
-    content: [{ type: "text" as const, text: text + savingsLine }],
+    content: [{ type: "text" as const, text: [text, codeGraphSection, savingsLine].filter(Boolean).join("") }],
     structuredContent: {
       ...(result.structuredContent ?? {}),
       broker: "contextgate",
@@ -783,9 +816,29 @@ function contextGateGetContextTool(args: Record<string, unknown>, mcpMode: McpMo
       inlineEvidence: slimContextGateInlineEvidence(inlineEvidence),
       effectiveAnswerable,
       recommendedNextAction: effectiveAnswerable ? "answer_now" : strictGaps.length > 0 ? "refill_missing_slots" : "answer_or_refill_from_contract",
-      naturalToolPolicy: "coverage-contract"
+      naturalToolPolicy: "coverage-contract",
+      codeGraphEnrichment: codeGraphEnrichment
+        ? { flowSteps: codeGraphEnrichment.flowSteps.length, slices: codeGraphEnrichment.slices.length, tokensEst: codeGraphEnrichment.tokensEst }
+        : undefined
     }
   };
+}
+
+function formatCodeGraphEnrichment(evidence: NonNullable<Awaited<ReturnType<typeof callCodeGraphBridge>>>): string {
+  const lines: string[] = ["\n\n--- CodeGraph enrichment (internal) ---"];
+  if (evidence.flowSteps.length > 0) {
+    lines.push("Flow steps:");
+    for (const step of evidence.flowSteps.slice(0, 8)) {
+      lines.push(`  ${step.file}:${step.lines} — ${step.summary}`);
+    }
+  }
+  if (evidence.slices.length > 0) {
+    lines.push("Source slices:");
+    for (const slice of evidence.slices.slice(0, 4)) {
+      lines.push(`  [${slice.symbol || slice.file}]\n${slice.text.slice(0, 800)}`);
+    }
+  }
+  return lines.join("\n");
 }
 
 interface ContextGateInlineSlice {

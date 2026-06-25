@@ -13,6 +13,7 @@ type SuiteBenchmarkMode =
   | "tokenopt-codegraph-natural"
   | "tokenopt-codegraph-adaptive"
   | "tokenopt-codegraph-hybrid"
+  | "tokenopt-internal-codegraph"
   | "contextgate-natural"
   | "mcp-first"
   | "mcp-only"
@@ -161,6 +162,7 @@ const ALL_SUITE_BENCHMARK_MODES: SuiteBenchmarkMode[] = [
   "tokenopt-codegraph-natural",
   "tokenopt-codegraph-adaptive",
   "tokenopt-codegraph-hybrid",
+  "tokenopt-internal-codegraph",
   "contextgate-natural",
   "mcp-first",
   "mcp-only",
@@ -539,13 +541,20 @@ function runCodexSuiteBenchmark(
 
   args.push("-");
 
+  // For tokenopt-internal-codegraph: pass CodeGraph CLI path to TokenOpt via env
+  // so it can call CodeGraph internally without the model seeing a second MCP tool.
+  const spawnEnv = mode === "tokenopt-internal-codegraph"
+    ? buildInternalCodeGraphEnv(process.env as Record<string, string>)
+    : undefined;
+
   const result = spawnSync("npx.cmd", args, {
     cwd: repo,
     encoding: "utf8",
     input: prompt,
     maxBuffer: 256 * 1024 * 1024,
     timeout: options.timeoutMs,
-    shell: process.platform === "win32"
+    shell: process.platform === "win32",
+    ...(spawnEnv ? { env: spawnEnv } : {})
   });
 
   const stdout = result.stdout ?? "";
@@ -631,6 +640,17 @@ function findLocalCodeGraphCli(cwd: string): string | undefined {
     path.resolve(cwd, "..", "codegraph", "dist", "cli.js")
   ];
   return candidates.find((candidate) => fs.existsSync(candidate));
+}
+
+function buildInternalCodeGraphEnv(base: Record<string, string>): Record<string, string> {
+  if (base.TOKENOPT_CODEGRAPH_CLI) {
+    return base;
+  }
+  const localCli = findLocalCodeGraphCli(process.cwd());
+  if (localCli) {
+    return { ...base, TOKENOPT_CODEGRAPH_CLI: slash(localCli) };
+  }
+  return base;
 }
 
 function looksLikeCommandPath(value: string): boolean {
@@ -862,6 +882,10 @@ export function adaptiveQualitySlicePlanForTask(task: Pick<SuiteTask, "id" | "cl
 }
 
 function usesCodeGraph(mode: SuiteBenchmarkMode, task?: SuiteTask): boolean {
+  // tokenopt-internal-codegraph uses NO external CodeGraph MCP — CodeGraph is called internally by TokenOpt
+  if (mode === "tokenopt-internal-codegraph") {
+    return false;
+  }
   if (mode === "tokenopt-codegraph-adaptive") {
     return task ? adaptivePlanForSuiteTask(task).useCodeGraph : true;
   }
@@ -2728,6 +2752,7 @@ function parseMode(value: string): SuiteBenchmarkMode {
     value === "tokenopt-codegraph-natural" ||
     value === "tokenopt-codegraph-adaptive" ||
     value === "tokenopt-codegraph-hybrid" ||
+    value === "tokenopt-internal-codegraph" ||
     value === "contextgate-natural" ||
     value === "mcp-first" ||
     value === "mcp-only" ||
@@ -2757,6 +2782,9 @@ function parseMode(value: string): SuiteBenchmarkMode {
   }
   if (value === "tokenopt+codegraph-hybrid" || value === "combined-hybrid" || value === "hybrid-codegraph") {
     return "tokenopt-codegraph-hybrid";
+  }
+  if (value === "internal-codegraph" || value === "tokenopt-internal" || value === "single-mcp") {
+    return "tokenopt-internal-codegraph";
   }
   if (value === "compiled-shadow-gate") {
     return "mcp-first";

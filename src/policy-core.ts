@@ -3,6 +3,7 @@ import path from "node:path";
 import { readActiveEvidenceTaskState, readEvidenceTaskState } from "./evidence-state.js";
 import {
   classifyGatewayPrompt,
+  isCodeGraphTool,
   isContextGateTool,
   isRawSourceAcquisitionTool,
   isRequirementTool,
@@ -120,6 +121,11 @@ function evaluatePreToolUse(event: TokenOptEvent, config: TokenOptConfig, runtim
   const gatewayDecision = evaluateGatewayPreToolUse(event, config, runtime);
   if (gatewayDecision) {
     return gatewayDecision;
+  }
+
+  const codeGraphDecision = evaluateCodeGraphPreToolUse(toolName, config, runtime);
+  if (codeGraphDecision) {
+    return codeGraphDecision;
   }
 
   if (toolName === "Bash") {
@@ -530,6 +536,51 @@ function detectExpensiveTest(command: string, config: TokenOptConfig): string | 
       return `Potentially expensive test command detected: ${normalized}.`;
     }
   }
+  return undefined;
+}
+
+function evaluateCodeGraphPreToolUse(
+  toolName: string,
+  config: TokenOptConfig,
+  runtime: PolicyRuntime
+): PolicyDecision | undefined {
+  if (!isCodeGraphTool(toolName)) {
+    return undefined;
+  }
+
+  // When internal bridge is active, the model should not call CodeGraph directly at all —
+  // TokenOpt handles it transparently inside contextgate_get_context.
+  if (config.codegraph.enabled) {
+    return {
+      action: "context",
+      reason: "CodeGraph internal bridge is active — do not call codegraph_context directly",
+      additionalContext:
+        "TokenOpt is configured with CodeGraph internal bridge (codegraph.enabled=true). Do not call codegraph_context or codegraph_slice directly — contextgate_get_context already calls CodeGraph internally and folds the results into the evidence packet."
+    };
+  }
+
+  const recentEvidence = readEvidenceTaskState(config, runtime.repoRoot);
+  if (!recentEvidence || Date.parse(recentEvidence.packet.expires_at) <= Date.now()) {
+    return {
+      action: "context",
+      reason: "codegraph called before contextgate_get_context",
+      additionalContext:
+        "Call contextgate_get_context first to get a bounded evidence packet. CodeGraph should only be called when the packet has a code_graph evidence gap — calling it before any packet exists wastes tokens without adding quality."
+    };
+  }
+
+  const hasCodeGraphGap = recentEvidence.packet.allowed_followups.some(
+    (f) => f.tool_categories?.includes("code_graph")
+  );
+  if (!hasCodeGraphGap) {
+    return {
+      action: "context",
+      reason: "contextgate packet has no code_graph gap — CodeGraph not needed",
+      additionalContext:
+        "The current contextgate evidence packet has no code_graph evidence gap. Do not call codegraph_context; answer from the packet instead to avoid token waste."
+    };
+  }
+
   return undefined;
 }
 
