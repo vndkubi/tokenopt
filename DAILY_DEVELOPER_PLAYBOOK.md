@@ -112,384 +112,195 @@ Runner-level enforcement needed:
 - Kill the whole Codex child process tree on timeout, not only the parent wrapper.
 - Record whether a result is "quality pass but over budget"; do not count that as a production-ready win.
 
-## Prompts With CodeGraph
+## Natural Developer Prompts
 
-Use these when CodeGraph readiness passes.
+The prompts below are what a developer types. TokenOpt and CodeGraph routing happens automatically through installed agent instructions — no tool names, no routing directives, no special syntax. Paste the artifact (PBI text, diff, Jira link, etc.) inline or attach it; the agent handles the rest.
 
-### Business Deepdive
+---
 
-```text
-Use TokenOpt as the slot checklist and CodeGraph as the source-of-truth evidence provider.
+### Investigate PBI / Requirement
 
-Call TokenOpt first for business slots, then CodeGraph get_flow_pack/get_research_pack for source evidence.
-Do not use shell unless CodeGraph explicitly misses one named slot.
+```
+Please investigate PBI-123 and create an implementation plan.
 
-Task:
-Business deepdive <business area/feature>. Explain current behavior, owner flow, core entities, tests, risks, and unknowns.
-
-Return valid compact JSON only with:
-summary, business_flow, core_entities, files, symbols, existing_tests, risks, next_questions.
+[Paste PBI title, description, and acceptance criteria here]
 ```
 
-### Investigate Flow
+Expected output:
+- What the PBI requires (summary + acceptance criteria)
+- Current behavior in the codebase
+- Impacted files, symbols, and tests
+- Implementation steps (scope, out-of-scope, risks)
+- Open questions and unknowns
 
-```text
-Use CodeGraph get_flow_pack first.
-Use the exact endpoint/class/symbol in the target. Follow API/controller, service/domain, storage/repository, caller/UI, and tests.
-Do not run broad repo exploration.
+---
 
-Task:
-Investigate flow for <endpoint/class/symbol/behavior>.
+### Investigate a Bug
 
-Return valid compact JSON only with:
-summary, flow, invariants, files, symbols, tests_to_run, risks.
+```
+Please investigate this bug and find the root cause.
+
+Bug: <describe symptom or paste failing test / stack trace>
 ```
 
-### E2E Trace Flow
+Expected output:
+- Reproduction path
+- Root cause hypotheses with evidence (files, symbols, line numbers)
+- Suggested fix plan
+- Tests to run to verify
 
-```text
-Use CodeGraph get_flow_pack first.
-Trace <endpoint/UI action/job/message/class/behavior> end to end through entrypoint, domain/service, storage/dependency, caller/UI, and tests.
-Use TokenOpt only as a completeness checklist for invariants, unresolved edges, tests, and risks.
-Do not run broad repo exploration.
+---
 
-Return valid compact JSON only with:
-entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, risks.
+### Implement a Plan
+
+```
+Please implement the plan for PBI-123.
+
+[Paste the implementation plan or link to the previous investigation output]
 ```
 
-### Requirement Analyst
+Expected output:
+- Changed files and implementation summary
+- Unit tests added or updated
+- Validation command and result
+- Residual risks
 
-```text
-Use TokenOpt+CodeGraph.
-TokenOpt extracts requirement slots; CodeGraph verifies current behavior and impacted code.
+---
 
-Requirement:
-<requirement or acceptance criteria>
+### Write Unit Tests
 
-Return valid compact JSON only with:
-requirement_summary, current_behavior, acceptance_criteria, impacted_files, symbols, test_strategy, risks, open_questions.
+```
+Please write unit tests for <ClassName> / <module> / <behavior>.
+
+[Optional: paste existing test file or describe the behavior under test]
 ```
 
-### PBI Investigate
+Expected output:
+- Target class and behavior
+- Missing coverage
+- Test cases with fixtures, mocks, and assertions
+- Exact test command to run
 
-```text
-Use TokenOpt+CodeGraph.
-Treat the PBI as the requirement artifact. Separate current behavior, impacted files, unknowns, compatibility risks, and next steps.
+---
 
-PBI:
-<PBI and acceptance criteria>
+### Investigate a Flow / Architecture
 
-Return valid compact JSON only with:
-pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps.
+```
+Please investigate how <feature / endpoint / job / flow> works end to end.
 ```
 
-### Bug Trace
+Expected output:
+- Entrypoint → domain/service → storage/dependency chain
+- Invariants and edge cases
+- Key files and symbols
+- Tests to run
 
-```text
-Use CodeGraph flow evidence or exact native trace from the failing artifact.
-Start from the symptom, failing test, stack trace, endpoint, or changed behavior. Trace to the smallest owner symbol.
+---
 
-Bug:
-<symptom, repro, failing test, or stack trace>
+### Code Review — Round 1 (Business & Requirement Coverage)
 
-Return valid compact JSON only with:
-summary, reproduction_path, root_cause_hypotheses, files, symbols, tests_to_run, fix_plan, risks.
+```
+Please review PR #11 (branch-a → branch-b) for business and requirement coverage.
+
+Jira: <link or paste ticket>
+Confluence: <link or paste spec>
+[Optional: paste the unified diff inline]
+
+Output: English markdown file
 ```
 
-### Plan Implement
+Expected output (markdown):
+- Summary of changes
+- Requirement coverage: does the diff satisfy the acceptance criteria?
+- Business impact and regression risks
+- Missing tests or coverage gaps
+- Overall assessment
 
-```text
-Use TokenOpt+CodeGraph change-pack evidence.
-Do not edit yet. Produce an implementation plan with exact files, symbols, test surfaces, validation commands, and risks.
+---
 
-Task:
-Plan implementation for <PBI/change>.
+### Code Review — Round 2 (Technical Quality)
 
-Return valid compact JSON only with:
-scope, out_of_scope, impacted_files, symbols, implementation_steps, tests, validation_commands, risks.
+```
+Please do a technical code review of this diff for coding quality.
+
+[Paste the unified diff]
+
+Check: naming, SOLID, YAGNI, KISS, DRY, error handling, edge cases, performance, security.
+Output: English markdown file
 ```
 
-### Write Unittest Class
+Expected output (markdown):
+- Technical findings per file/symbol (actionable, introduced by the diff)
+- Similar logic that may need the same change
+- Missing tests
+- Review status (approve / request changes)
 
-```text
-Use CodeGraph get_change_pack first with changeType=test for the named class/module/behavior.
-Use TokenOpt as a coverage checklist only if existing tests, assertions, fixtures, or validation commands are incomplete.
+---
 
-Target:
-<class/module/file and behavior>
+### Code Review — Round 3 (Checklist)
 
-Return valid compact JSON only with:
-target_class, behavior, existing_coverage, missing_coverage, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, risks.
+```
+Please verify the PR #11 checklist items are covered.
+
+[Paste checklist or specify the review standard, e.g. team definition-of-done]
+[Paste diff or name changed files]
 ```
 
-### Implement Code + Unit Tests
+Expected output:
+- Checklist item × pass/fail/partial
+- Notes per item
 
-```text
-Use CodeGraph change-pack evidence first. Use TokenOpt as a coverage checklist if owner files/tests are not all known.
+---
 
-Task:
-Implement <change>.
+### Refactor
 
-Requirements:
-- Make the smallest scoped code change.
-- Add or update targeted unit tests.
-- Preserve existing behavior outside the requested change.
-- Run the narrowest relevant validation command.
+```
+Please plan a refactor of <area/class/module> to <goal>.
 
-Before editing, identify:
-files_to_change, owner_symbols, invariants, existing_tests, tests_to_add, validation_commands, risks.
-
-After editing, return:
-changed_files, implementation_summary, tests_added, validation_result, residual_risks.
+Goal: <e.g. extract service layer, reduce duplication, improve readability>
 ```
 
-### Code Review
+Expected output:
+- Current flow and behavior invariants
+- Safe refactor steps that preserve behavior
+- Tests and validation commands
+- Risks
 
-```text
-Review the net diff, not individual commits.
-Use CodeGraph review evidence for changed flow, similar logic, likely tests, and business impact.
-Use TokenOpt as the review checklist.
-
-Check:
-- syntax/runtime bugs
-- correctness and regressions
-- business requirement coverage
-- edge cases and state transitions
-- similar logic needing the same change
-- missing tests
-- security, performance, compatibility, resource lifecycle
-
-Return valid compact JSON only with:
-findings, business_coverage, similar_logic, missing_tests, files, symbols, risks, review_status.
-Findings must be actionable and introduced by the diff.
-```
+---
 
 ### Performance Analysis
 
-```text
-Use TokenOpt+CodeGraph.
-TokenOpt supplies the cost-model and validation slots; CodeGraph grounds the code path, likely hotspots, tests, and benchmark commands.
-Do not propose optimizations until measurement points and correctness risks are named.
-
-Task:
-Performance analysis for <workflow/query/endpoint/module>.
-
-Return valid compact JSON only with:
-target, suspected_hotspots, cost_model, measurements, optimization_options, validation_commands, risks, evidence_used.
 ```
+Please analyze performance of <endpoint / query / workflow / module>.
+
+[Optional: paste profiler output, slow query log, or latency trace]
+```
+
+Expected output:
+- Suspected hotspots with evidence
+- Cost model (where time/memory is spent)
+- Measurement points and benchmark commands
+- Optimization options with risk/effort
+
+---
 
 ### Security Audit
 
-```text
-Review the concrete diff/scope/risky surface first.
-Use TokenOpt security_audit or CodeGraph review_patch evidence. Do not run broad vulnerability hunting.
-Separate exploitable findings, non-findings, and missing security coverage.
+```
+Please do a security audit of this diff / PR / module.
 
-Scope:
-<diff, PR, changed files, route, symbol, or risky surface>
-
-Return valid compact JSON only with:
-status, findings, evidence_used, missing_coverage, non_findings, next_steps.
+[Paste the diff or describe the surface: route, input handling, auth flow, etc.]
 ```
 
-### Refactor Code
-
-```text
-Use CodeGraph change-pack or flow-pack evidence.
-First name behavior invariants and tests. Then propose refactor steps.
-Do not change behavior without an explicit requirement.
-
-Task:
-Refactor <area/symbol> to <goal>.
-
-Return valid compact JSON only with:
-refactor_goal, current_flow, files, symbols, safe_steps, tests, validation_commands, risks.
-```
-
-## Prompts Without CodeGraph
-
-Use these when CodeGraph readiness fails. The route is TokenOpt first for checklist/budget, then exact native search/read.
-
-### No-CodeGraph Shared Prefix
-
-```text
-CodeGraph is unavailable. Use TokenOpt as a slot checklist, then use native narrow search/read only for named missing slots.
-
-Native fallback budget:
-- At most one exact rg query from task anchors.
-- At most one batched small-slice read command.
-- At most one targeted test search.
-- No rg --files, no broad tree listing, no whole-file reads unless the file is tiny and already selected.
-- Stop after 3 shell calls and mark remaining gaps.
-```
-
-### Business Deepdive
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Task:
-Business deepdive <business area/feature>.
-
-Return valid compact JSON only with:
-summary, business_flow, core_entities, files, symbols, existing_tests, risks, next_questions.
-```
-
-### Investigate Flow
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Start from exact anchors: <endpoint/class/symbol/term>.
-Run one rg for these anchors, read small slices around the top owner files, then optionally search tests for the owner symbol.
-
-Return valid compact JSON only with:
-summary, flow, invariants, files, symbols, tests_to_run, risks.
-```
-
-### E2E Trace Flow
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Start from exact anchors: <endpoint/UI action/job/message/class/behavior>.
-Run one rg for those anchors, read small slices around the owner files, then optionally search tests for the owner symbol.
-Mark any unverified edge as inferred.
-
-Return valid compact JSON only with:
-entrypoint, sequence, invariants, files, symbols, tests_to_run, inferred_edges, risks.
-```
-
-### Requirement Analyst
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Requirement:
-<requirement or acceptance criteria>
-
-Find current behavior from exact terms in the requirement. Do not broaden scope after the first anchor search.
-
-Return valid compact JSON only with:
-requirement_summary, current_behavior, acceptance_criteria, impacted_files, symbols, test_strategy, risks, open_questions.
-```
-
-### PBI Investigate
-
-```text
-<No-CodeGraph Shared Prefix>
-
-PBI:
-<PBI and acceptance criteria>
-
-Return valid compact JSON only with:
-pbi_summary, business_flow, acceptance_criteria, impacted_files, symbols, unknowns, risks, next_steps.
-```
-
-### Bug Trace
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Bug:
-<symptom/repro/failing test/stack trace>
-
-Search only the failing test name, stack frame, endpoint, or changed behavior term. Read the owner slice and nearest tests.
-
-Return valid compact JSON only with:
-summary, reproduction_path, root_cause_hypotheses, files, symbols, tests_to_run, fix_plan, risks.
-```
-
-### Plan Implement
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Task:
-Plan implementation for <PBI/change>.
-
-Return valid compact JSON only with:
-scope, out_of_scope, impacted_files, symbols, implementation_steps, tests, validation_commands, risks.
-```
-
-### Write Unittest Class
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Target:
-<class/module/file and behavior>
-
-Search exact owner symbol and nearby tests only. Do not guess a class when the target is missing.
-
-Return valid compact JSON only with:
-target_class, behavior, existing_coverage, missing_coverage, test_location, test_cases, fixtures_or_mocks, assertions, targeted_command, risks.
-```
-
-### Implement Code + Unit Tests
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Task:
-Implement <change>.
-
-Before editing, use exact native search/read to identify owner files, related tests, invariants, and validation commands.
-Then implement the smallest change and targeted unit tests.
-
-Return:
-changed_files, implementation_summary, tests_added, validation_result, residual_risks.
-```
-
-### Code Review
-
-```text
-Review the provided diff first.
-Use native narrow reads only for changed files, direct callers/callees, similar logic named by the diff, and likely tests.
-Do not explore unrelated repo areas.
-
-Return valid compact JSON only with:
-findings, business_coverage, similar_logic, missing_tests, files, symbols, risks, review_status.
-```
-
-### Performance Analysis
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Task:
-Performance analysis for <workflow/query/endpoint/module>.
-
-Use exact anchor search/read for the named path only. Separate measured facts, hypotheses, measurement plan, and optimization options.
-
-Return valid compact JSON only with:
-target, suspected_hotspots, cost_model, measurements, optimization_options, validation_commands, risks, evidence_used.
-```
-
-### Security Audit
-
-```text
-Review the provided diff/scope first.
-Use native narrow reads only for changed files, direct auth/input/data-flow boundaries, and likely tests.
-If no concrete security scope exists, ask for the diff, PR, changed files, route, symbol, or risky surface.
-
-Return valid compact JSON only with:
-status, findings, evidence_used, missing_coverage, non_findings, next_steps.
-```
-
-### Refactor Code
-
-```text
-<No-CodeGraph Shared Prefix>
-
-Task:
-Refactor <area/symbol> to <goal>.
-
-Search exact owner symbol and tests only. Name behavior invariants before refactor steps.
-
-Return valid compact JSON only with:
-refactor_goal, current_flow, files, symbols, safe_steps, tests, validation_commands, risks.
-```
+Expected output:
+- Exploitable findings (severity, location, reproduction)
+- Non-findings (areas checked, no issue found)
+- Missing security coverage
+- Recommended next steps
+
+---
+
+> **How routing works (transparent to users):** The installed agent instructions (AGENTS.md, `.github/copilot-instructions.md`, `.github/prompts/*.prompt.md`) and MCP `SERVER_INSTRUCTIONS` decide whether to call `contextgate_get_context`, `codegraph_context`, or a narrow read/search. Users never need to mention TokenOpt or CodeGraph by name. If an artifact (PBI, diff, Jira ticket) is missing, the agent will ask for it before touching the repo.
 
 ## Benchmark Modes
 
