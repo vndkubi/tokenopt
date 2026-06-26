@@ -5,7 +5,7 @@ import { freshUsageTokens, totalUsageTokens } from "./token-estimator.js";
 
 export { freshUsageTokens, totalUsageTokens };
 
-type WorkflowMode = "baseline" | "tokenopt" | "speckit" | "speckit-tokenopt" | "tokenopt-prompt-chain";
+type WorkflowMode = "baseline" | "tokenopt" | "speckit" | "speckit-tokenopt" | "tokenopt-prompt-chain" | "speckit-gate-first" | "speckit-compact";
 type UsageStatus = "completed" | "timeout" | "missing";
 type McpMode = "lite" | "full";
 
@@ -94,9 +94,19 @@ interface WorkflowBenchmarkRow extends CodexRunMetrics {
 }
 
 const CODEX_PACKAGE = "@openai/codex@0.137.0";
-const WORKFLOWS: WorkflowMode[] = ["baseline", "tokenopt", "speckit", "speckit-tokenopt"];
+const WORKFLOWS: WorkflowMode[] = ["baseline", "tokenopt", "speckit", "speckit-tokenopt", "speckit-gate-first", "speckit-compact"];
 
 export async function runWorkflowAbBenchmarkCommand(args: string[]): Promise<number> {
+  // dry-run: print prompts without running Codex
+  if (args.includes("--dry-run")) {
+    const options = parseOptions(args.filter((a) => a !== "--dry-run"));
+    for (const workflow of options.workflows) {
+      const prompt = buildWorkflowPrompt({ workflow, feature: options.feature, repo: options.repo, worktree: options.repo, testCommand: options.testCommand });
+      process.stdout.write(`\n${"=".repeat(60)}\n[${workflow}] ${prompt.split("\n").length} lines, ~${Math.round(prompt.length / 4)} tokens est\n${"=".repeat(60)}\n${prompt}\n`);
+    }
+    return 0;
+  }
+
   const options = parseOptions(args);
   const baseCommit = gitOutput(options.repo, ["rev-parse", options.baseRef]).trim();
   fs.mkdirSync(options.rawDir, { recursive: true });
@@ -144,7 +154,7 @@ export function buildWorkflowPrompt(input: {
     "Return compact JSON only with:",
     "{",
     '  "workflow": "baseline|tokenopt|speckit|speckit-tokenopt|tokenopt-prompt-chain",',
-    '  "acquisition_mode": "native_bounded|tokenopt_bypass|tokenopt_mcp|speckit|speckit_tokenopt_bypass|speckit_tokenopt_mcp|tokenopt_prompt_chain_bypass|tokenopt_prompt_chain_mcp",',
+    '  "acquisition_mode": "native_bounded|tokenopt_bypass|tokenopt_mcp|speckit|speckit_tokenopt_bypass|speckit_tokenopt_mcp|speckit_gate_first_mcp|speckit_compact_mcp|tokenopt_prompt_chain_bypass|tokenopt_prompt_chain_mcp",',
     '  "changed_files": [],',
     '  "tests_run": [],',
     '  "tests_passed": true,',
@@ -221,6 +231,75 @@ export function buildWorkflowPrompt(input: {
     ].join("\n");
   }
 
+  if (input.workflow === "speckit-gate-first") {
+    return [
+      "Workflow: speckit-gate-first",
+      "",
+      "Use a ContextGate-first spec-driven workflow. Evidence acquisition happens BEFORE specification, not during it.",
+      "",
+      "Phase 0 - evidence (MUST run first, before any spec writing):",
+      "  Call contextgate_get_context once with the full Feature request text as the task and task_type=implement.",
+      "  Do NOT grep, read, or shell-explore the repository before this call.",
+      "  If the packet is answerable, proceed to Phase 1 using only packet facts.",
+      "  If the packet has missing slots, fill ONLY the exact named files/symbols listed in allowed_followups — no broad search.",
+      "",
+      "Phase 1 - specify (from packet, not from exploration):",
+      "  Write specs/workflow-ab-<feature-id>/spec.md using evidence from the packet.",
+      "  Include: WHAT (behavior), WHERE (exact files/symbols from packet), HOW (approach), acceptance criteria, risks.",
+      "  Do not run additional shell commands to discover information already in the packet.",
+      "",
+      "Phase 2 - plan (from spec + packet):",
+      "  Write specs/workflow-ab-<feature-id>/plan.md with exact target files, symbols, test changes.",
+      "  Source only from spec.md and the packet — no new discovery.",
+      "",
+      "Phase 3 - tasks:",
+      "  Write specs/workflow-ab-<feature-id>/tasks.md as a numbered checklist derived from the plan.",
+      "",
+      "Phase 4 - implement:",
+      "  Edit only the exact files listed in plan.md. Do not re-explore.",
+      "",
+      "Phase 5 - validate:",
+      "  Run the configured validation command.",
+      "",
+      ...common
+    ].join("\n");
+  }
+
+  if (input.workflow === "speckit-compact") {
+    return [
+      "Workflow: speckit-compact",
+      "",
+      "Use a ContextGate-first compact workflow: evidence first, single inline specplan, then implement.",
+      "No separate spec/plan/tasks files are written to disk — produce a single specplan block, then implement directly.",
+      "",
+      "Phase 0 - evidence (MUST run first):",
+      "  Call contextgate_get_context once with the full Feature request text as the task and task_type=implement.",
+      "  Do NOT grep, read, or shell-explore the repository before this call.",
+      "  If answerable, skip directly to Phase 2 — no specplan needed when evidence is complete.",
+      "  If missing slots, fill ONLY the exact named files/symbols from allowed_followups.",
+      "",
+      "Phase 1 - specplan (inline, not written to disk):",
+      "  Output a compact specplan block in your reasoning (NOT as a file write):",
+      "  SPECPLAN:",
+      "    what: <single line behavior>",
+      "    files: <exact files from packet>",
+      "    tests: <exact test files from packet>",
+      "    tasks:",
+      "      - <concrete edit step>",
+      "      - ...",
+      "  Keep it under 15 lines total. Do not write spec.md, plan.md, or tasks.md.",
+      "",
+      "Phase 2 - implement:",
+      "  Edit only the exact files listed in the specplan/packet.",
+      "  Do not re-explore or run broad searches.",
+      "",
+      "Phase 3 - validate:",
+      "  Run the configured validation command.",
+      "",
+      ...common
+    ].join("\n");
+  }
+
   if (input.workflow === "tokenopt-prompt-chain") {
     return [
       "Workflow: tokenopt-prompt-chain",
@@ -273,11 +352,14 @@ export function scoreWorkflowResult(input: {
     { name: "diff_non_empty", passed: input.row.diffShortStat.trim().length > 0 },
     { name: "final_answer_mentions_tests", passed: /\b(tests?_run|tests?_passed|validation|test)\b/i.test(input.row.finalAnswer) }
   ];
-  if (input.row.workflow === "speckit" || input.row.workflow === "speckit-tokenopt") {
+  if (input.row.workflow === "speckit" || input.row.workflow === "speckit-tokenopt" || input.row.workflow === "speckit-gate-first") {
     checks.push({ name: "speckit_artifacts_created", passed: input.row.changedFiles.some((file) => /^specs\/workflow-ab-[^/]+\/(?:spec|plan|tasks)\.md$/i.test(file.replace(/\\/g, "/"))) });
   }
   if (input.row.workflow === "speckit-tokenopt") {
     checks.push({ name: "hybrid_followed_tokenopt_policy", passed: input.row.mcpCalls > 0 || /"acquisition_mode"\s*:\s*"speckit_tokenopt_bypass"/i.test(input.row.finalAnswer) });
+  }
+  if (input.row.workflow === "speckit-gate-first" || input.row.workflow === "speckit-compact") {
+    checks.push({ name: "gate_called_first", passed: input.row.mcpCalls > 0 });
   }
   for (const item of input.feature.qualityRubric) {
     const validationPassed = /\b(validation|validate|passes?|passed)\b/i.test(item) && input.row.testsPassed;
@@ -451,7 +533,7 @@ function runCodex(
   if (options.model) {
     args.push("-m", options.model);
   }
-  if (workflow === "tokenopt" || workflow === "speckit-tokenopt" || workflow === "tokenopt-prompt-chain") {
+  if (workflow === "tokenopt" || workflow === "speckit-tokenopt" || workflow === "tokenopt-prompt-chain" || workflow === "speckit-gate-first" || workflow === "speckit-compact") {
     args.push(
       "-c",
       "mcp_servers.tokenopt.command='node'",
@@ -947,11 +1029,17 @@ function normalizeRubricText(value: string): string {
 }
 
 function parseWorkflow(value: string): WorkflowMode {
-  if (value === "baseline" || value === "tokenopt" || value === "speckit" || value === "speckit-tokenopt" || value === "tokenopt-prompt-chain") {
+  if (value === "baseline" || value === "tokenopt" || value === "speckit" || value === "speckit-tokenopt" || value === "tokenopt-prompt-chain" || value === "speckit-gate-first" || value === "speckit-compact") {
     return value;
   }
   if (value === "speckit-only") {
     return "speckit";
+  }
+  if (value === "gate-first") {
+    return "speckit-gate-first";
+  }
+  if (value === "compact") {
+    return "speckit-compact";
   }
   throw new Error(`Unknown workflow: ${value}`);
 }
@@ -1048,7 +1136,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function workflowBenchmarkHelp(): string {
   return `Usage:
-  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-only,speckit-tokenopt,tokenopt-prompt-chain] [--base-ref HEAD] [--test-command <command>] [--mcp-mode lite|full] [--validation-timeout-ms 300000] [--out <json>] [--markdown <md>] [--show-answers]
+  tokenopt benchmark workflow-ab --repo <path> --feature-file <json|txt> [--workflow baseline,tokenopt,speckit,speckit-only,speckit-tokenopt,speckit-gate-first,speckit-compact,tokenopt-prompt-chain] [--base-ref HEAD] [--test-command <command>] [--mcp-mode lite|full] [--validation-timeout-ms 300000] [--out <json>] [--markdown <md>] [--show-answers]
 
 Feature JSON:
   {
